@@ -19,6 +19,16 @@
     let
       inherit (nixpkgs) lib;
       helpers = import ./lib/helpers.nix { inherit lib; };
+
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
+
+      forAllSystems =
+        f: builtins.listToAttrs (builtins.map (system: lib.nameValuePair system (f system)) systems);
     in
     {
       # Terranix modules — system-independent
@@ -125,18 +135,29 @@
       };
 
       # Formatter — per-system output
-      formatter = builtins.listToAttrs (
-        builtins.map
-          (system: {
-            name = system;
-            value = nixpkgs.legacyPackages.${system}.nixfmt-tree;
-          })
-          [
-            "x86_64-linux"
-            "aarch64-linux"
-            "x86_64-darwin"
-            "aarch64-darwin"
-          ]
+      formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt-tree);
+
+      # Development shell — `nix develop` / direnv `use flake`
+      devShells = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          default = pkgs.mkShell {
+            packages = with pkgs; [
+              nix
+              just
+              git
+              statix
+              deadnix
+              nixfmt-tree
+              opentofu
+              sops
+              jq
+            ];
+          };
+        }
       );
     };
 }

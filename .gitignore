@@ -1,2 +1,16 @@
+# Nix build artifacts
 result
-.direnv
+result-*
+
+# direnv
+.direnv/
+
+# Terraform / OpenTofu state
+.terraform/
+*.tfstate
+*.tfstate.*
+config.tf.json
+
+# Internal planning docs (kept local, not published)
+docs/plans/
+docs/specs/
