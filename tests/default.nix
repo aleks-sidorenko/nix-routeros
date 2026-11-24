@@ -271,7 +271,7 @@ in
         r.routeros_ip_dhcp_client.primary.add_default_route
         r.routeros_ip_dhcp_client.primary.interface
         (lib.hasInfix "1.0.0.1/32" r.routeros_ip_dhcp_client.primary.script)
-        (lib.hasInfix "nix-routeros:primary" r.routeros_ip_dhcp_client.primary.script)
+        (lib.hasInfix ":local tag \"nix-routeros:primary\"" r.routeros_ip_dhcp_client.primary.script)
         r.routeros_interface_list_member.primary.list
         r.routeros_interface_list.WAN.name
       ];
@@ -488,4 +488,63 @@ in
     ];
     expected = true;
   };
+
+  testLteNoUncheckedRoute =
+    let
+      r =
+        (render [
+          base
+          {
+            routeros.uplinks = {
+              a = {
+                kind = "lte";
+                check.host = "9.9.9.9";
+                lte.apn = "internet";
+              };
+              b = {
+                kind = "lte";
+                interface = "lte2";
+                check.host = "9.9.9.8";
+              };
+            };
+          }
+        ]).resource;
+    in
+    {
+      expr = [
+        (builtins.mapAttrs (_: p: {
+          inherit (p) add_default_route use_peer_dns use_network_apn;
+          hasApn = p ? apn;
+        }) r.routeros_interface_lte_apn)
+        (builtins.mapAttrs (_: l: {
+          inherit (l) name apn_profiles;
+        }) r.routeros_interface_lte)
+      ];
+      expected = [
+        {
+          a = {
+            add_default_route = false;
+            use_peer_dns = false;
+            use_network_apn = false;
+            hasApn = true;
+          };
+          b = {
+            add_default_route = false;
+            use_peer_dns = false;
+            use_network_apn = true;
+            hasApn = false;
+          };
+        }
+        {
+          a = {
+            name = "lte1";
+            apn_profiles = "a";
+          };
+          b = {
+            name = "lte2";
+            apn_profiles = "b";
+          };
+        }
+      ];
+    };
 }

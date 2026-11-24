@@ -11,7 +11,7 @@ let
     "wifi-station"
   ];
   isDhcp = u: lib.elem u.kind dhcpKinds;
-  tag = name: "nix-routeros:${name}";
+  tag = name: "nix-routeros:${sanitizeName name}";
 
   # Keeps the check host reachable only through this uplink so the default
   # route's `check_gateway` tests the uplink itself. The route is made on the
@@ -31,6 +31,7 @@ let
   byHost = builtins.groupBy (u: u.check.host) (
     lib.mapAttrsToList (name: u: u // { inherit name; }) cfg
   );
+  ltes = only (u: u.kind == "lte") cfg;
   pppoes = only (u: u.kind == "pppoe") cfg;
 in
 {
@@ -127,11 +128,23 @@ in
           }
         ) (only (u: !isDhcp u) cfg);
 
-      routeros_interface_lte_apn = mapUplinks (name: u: {
-        inherit name;
-        inherit (u.lte) apn;
-        use_network_apn = false;
-      }) (only (u: u.kind == "lte" && u.lte.apn != null) cfg);
+      # The LTE interface is built in, so it is only attached to our profile;
+      # a profile that added its own default route would bypass check_gateway.
+      routeros_interface_lte_apn = mapUplinks (
+        name: u:
+        {
+          inherit name;
+          add_default_route = false;
+          use_peer_dns = false;
+          use_network_apn = u.lte.apn == null;
+        }
+        // lib.optionalAttrs (u.lte.apn != null) { inherit (u.lte) apn; }
+      ) ltes;
+
+      routeros_interface_lte = mapUplinks (name: u: {
+        name = u.interface;
+        apn_profiles = name;
+      }) ltes;
 
       routeros_interface_pppoe_client = mapUplinks (name: u: {
         name = u.interface;
