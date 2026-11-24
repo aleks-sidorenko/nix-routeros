@@ -36,9 +36,8 @@
         default = ./modules;
         connection = ./modules/connection.nix;
         system = ./modules/system.nix;
-        bridge = ./modules/bridge.nix;
+        lan = ./modules/lan.nix;
         interfaces = ./modules/interfaces.nix;
-        dhcp = ./modules/dhcp.nix;
         dns = ./modules/dns.nix;
         firewall = ./modules/firewall.nix;
         wifi = ./modules/wifi.nix;

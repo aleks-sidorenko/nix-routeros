@@ -52,35 +52,20 @@ in
     };
   };
 
-  hostType = types.submodule {
+  leaseType = types.submodule {
     options = {
-      ip = mkOption {
-        type = types.str;
-        description = "IP address of the host.";
-      };
       mac = mkOption {
         type = types.str;
         description = "MAC address of the host.";
       };
+      address = mkOption {
+        type = types.str;
+        description = "Fixed IP address; must be inside the LAN subnet and outside the DHCP pool.";
+      };
       comment = mkOption {
         type = types.str;
         default = "";
-        description = "Comment for DHCP lease and DNS record.";
-      };
-      dhcp = mkOption {
-        type = types.bool;
-        default = true;
-        description = "Whether to create a static DHCP lease.";
-      };
-      dns = mkOption {
-        type = types.bool;
-        default = true;
-        description = "Whether to create a DNS A record.";
-      };
-      aliases = mkOption {
-        type = types.listOf types.str;
-        default = [ ];
-        description = "Additional DNS names pointing to this host's IP.";
+        description = "Lease comment; defaults to the lease name.";
       };
     };
   };

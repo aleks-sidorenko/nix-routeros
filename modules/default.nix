@@ -1,39 +1,47 @@
-{ lib, ... }:
+{ config, lib, ... }:
 let
   helpers = import ../lib/helpers.nix { inherit lib; };
-  customTypes = import ../lib/types.nix { inherit lib; };
+  failed = lib.filter (c: !c.assertion) config.routeros._checks;
 in
 {
   imports = [
     ./device.nix
     ./connection.nix
     ./system.nix
-    ./bridge.nix
+    ./lan.nix
     ./interfaces.nix
-    ./dhcp.nix
     ./dns.nix
     ./firewall.nix
     ./wifi.nix
   ];
 
   options.routeros = {
-    hosts = lib.mkOption {
-      type = lib.types.attrsOf customTypes.hostType;
-      default = { };
-      description = "Host inventory. Drives DHCP leases, DNS records, and aliases.";
+    # terranix has no `assertions`; modules append here and the entries are
+    # forced through `resource`, so a failed one aborts evaluation.
+    _checks = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options = {
+            assertion = lib.mkOption { type = lib.types.bool; };
+            message = lib.mkOption { type = lib.types.str; };
+          };
+        }
+      );
+      internal = true;
+      default = [ ];
+      description = "Evaluation-time checks: each fails evaluation with its message when its assertion is false.";
     };
 
-    # Shared network option consumed by system.nix and dhcp.nix
-    network.subnet = lib.mkOption {
-      type = lib.types.str;
-      description = "Network subnet in CIDR notation (e.g. 10.0.0.0/24).";
-    };
-
-    # Internal: expose helpers to other modules
     _lib = lib.mkOption {
       type = lib.types.attrs;
       internal = true;
       default = helpers;
     };
   };
+
+  config.resource =
+    if failed == [ ] then
+      { }
+    else
+      throw "nix-routeros:\n${lib.concatMapStringsSep "\n" (c: "- ${c.message}") failed}";
 }

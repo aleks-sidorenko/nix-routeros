@@ -24,14 +24,18 @@ let
   parseCidr =
     cidr:
     let
-      parts = lib.splitString "/" cidr;
-      address = builtins.elemAt parts 0;
-      prefix = lib.toInt (builtins.elemAt parts 1);
+      m = builtins.match "([0-9]+)\\.([0-9]+)\\.([0-9]+)\\.([0-9]+)/([0-9]+)" cidr;
+      nums = map lib.toInt m;
+      address = lib.concatStringsSep "." (lib.take 4 m);
+      prefix = lib.last nums;
     in
-    {
-      inherit address prefix;
-      network = intToIp (builtins.bitAnd (ipToInt address) (maskOf prefix));
-    };
+    if m == null || lib.any (o: o > 255) (lib.take 4 nums) || prefix > 32 then
+      throw "invalid CIDR '${cidr}': expected a.b.c.d/prefix with octets 0-255 and prefix 0-32"
+    else
+      {
+        inherit address prefix;
+        network = intToIp (builtins.bitAnd (ipToInt address) (maskOf prefix));
+      };
 in
 {
   inherit parseCidr;

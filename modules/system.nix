@@ -1,10 +1,7 @@
 { config, lib, ... }:
 let
   cfg = config.routeros.system;
-  connCfg = config.routeros.connection;
-  helpers = config.routeros._lib;
-  networkAddress = helpers.networkAddress connCfg.gateway;
-  prefixLength = helpers.prefixLength config.routeros.network.subnet;
+  lanSubnet = config.routeros.lan.subnet;
 
   mkServiceOpt = name: defaults: {
     enable = lib.mkOption {
@@ -39,9 +36,18 @@ in
     };
 
     services = {
-      ssh = mkServiceOpt "SSH" { port = 22; };
-      winbox = mkServiceOpt "Winbox" { port = 8291; };
-      api = mkServiceOpt "API" { port = 8728; };
+      ssh = mkServiceOpt "SSH" {
+        port = 22;
+        allowedAddresses = lanSubnet;
+      };
+      winbox = mkServiceOpt "Winbox" {
+        port = 8291;
+        allowedAddresses = lanSubnet;
+      };
+      api = mkServiceOpt "API" {
+        port = 8728;
+        allowedAddresses = lanSubnet;
+      };
       ftp = mkServiceOpt "FTP" {
         enable = false;
         port = 21;
@@ -141,13 +147,6 @@ in
       routeros_system_clock.default = {
         time_zone_name = cfg.timezone;
         time_zone_autodetect = false;
-      };
-
-      routeros_ip_address.bridge = {
-        address = "${connCfg.gateway}/${toString prefixLength}";
-        interface = "bridge";
-        network = networkAddress;
-        comment = "defconf";
       };
 
       routeros_ip_service =

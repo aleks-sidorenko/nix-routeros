@@ -119,7 +119,7 @@ let
       chain = "dstnat";
       dst_port = 53;
       protocol = "udp";
-      to_addresses = config.routeros.connection.gateway;
+      to_addresses = (helpers.parseCidr config.routeros.lan.address).address;
       to_ports = 53;
     }
   ];
