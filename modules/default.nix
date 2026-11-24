@@ -12,7 +12,7 @@ in
     ./uplinks.nix
     ./dns.nix
     ./firewall.nix
-    ./wifi.nix
+    ./wifi
   ];
 
   options.routeros = {

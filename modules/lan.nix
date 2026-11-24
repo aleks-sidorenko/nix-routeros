@@ -93,6 +93,15 @@ in
       default = [ ];
       description = "Interfaces used by uplinks.";
     };
+
+    # Set by the Wi-Fi module, apart from `lan.ports` so overriding the
+    # ports keeps the access points bridged.
+    _wifiPorts = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      internal = true;
+      default = { };
+      description = "Access point interfaces bridged into the LAN, by resource name.";
+    };
   };
 
   config = {
@@ -111,14 +120,14 @@ in
         port_cost_mode = "short";
       };
 
-      routeros_interface_bridge_port = lib.genAttrs cfg.ports (iface: {
+      routeros_interface_bridge_port = lib.mapAttrs (_: interface: {
         bridge = "bridge";
-        interface = iface;
+        inherit interface;
         comment = "defconf";
         ingress_filtering = false;
         internal_path_cost = 10;
         path_cost = 10;
-      });
+      }) (lib.genAttrs cfg.ports lib.id // config.routeros._wifiPorts);
 
       routeros_ip_address.lan = {
         address = cfg.address;

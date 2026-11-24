@@ -75,10 +75,10 @@ in
                 ethernet = defaultUplink;
                 lte = "lte1";
                 pppoe = "pppoe-${name}";
-                wifi-station = "${toString config.station.radio}-station";
+                wifi-station = toString config.station.radio;
               }
               .${config.kind};
-            defaultText = "by kind: the device uplink port, lte1, pppoe-<name>, <station.radio>-station";
+            defaultText = "by kind: the device uplink port, lte1, pppoe-<name>, station.radio";
             description = "Interface carrying the uplink.";
           };
           distance = mkOption {
@@ -116,7 +116,7 @@ in
           station.radio = mkOption {
             type = types.nullOr types.str;
             default = null;
-            description = "Radio the station interface is created on.";
+            description = "Radio that runs the station; its access points become virtual interfaces following the upstream channel.";
           };
         };
       }

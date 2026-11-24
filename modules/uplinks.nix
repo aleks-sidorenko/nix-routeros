@@ -32,6 +32,9 @@ let
     lib.mapAttrsToList (name: u: u // { inherit name; }) cfg
   );
   ltes = only (u: u.kind == "lte") cfg;
+  stationsByRadio = builtins.groupBy (u: toString u.station.radio) (
+    lib.mapAttrsToList (name: u: u // { inherit name; }) (only (u: u.kind == "wifi-station") cfg)
+  );
   pppoes = only (u: u.kind == "pppoe") cfg;
 in
 {
@@ -59,6 +62,14 @@ in
           message = "routeros.uplinks.${(lib.head us).name}.check.host ${host} is also a DNS upstream; its /32 route would pin DNS to one uplink";
         }
       ]) byHost
+      ++ lib.mapAttrsToList (radio: us: [
+        {
+          assertion = lib.length us == 1;
+          message = "routeros.uplinks ${
+            lib.concatMapStringsSep ", " (u: u.name) us
+          } run a station on the same radio ${radio}";
+        }
+      ]) stationsByRadio
       ++ lib.mapAttrsToList (name: u: [
         {
           assertion = u.kind != "lte" || device.usb;
@@ -69,6 +80,10 @@ in
             u.kind != "wifi-station"
             || (u.station.radio != null && device.wifi != null && device.wifi.radios ? ${u.station.radio});
           message = "routeros.uplinks.${name}: station.radio must name a radio of the device";
+        }
+        {
+          assertion = u.kind != "wifi-station" || u.interface == u.station.radio;
+          message = "routeros.uplinks.${name}: a station runs on its radio's own interface, so interface must equal station.radio";
         }
         {
           assertion = u.kind != "pppoe" || (u.pppoe.user != null && u.pppoe.passwordVariable != null);

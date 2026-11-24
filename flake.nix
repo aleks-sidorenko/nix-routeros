@@ -40,7 +40,7 @@
         interfaces = ./modules/interfaces.nix;
         dns = ./modules/dns.nix;
         firewall = ./modules/firewall.nix;
-        wifi = ./modules/wifi.nix;
+        wifi = ./modules/wifi;
       };
 
       lib = helpers // {
