@@ -1,36 +1,31 @@
 {
   routeros = {
-    connection.gateway = "10.0.0.1";
+    device = "hap-ax3";
 
-    network = {
-      subnet = "10.0.0.0/24";
-      dhcp.server.range = "10.0.0.50-10.0.0.250";
+    connection = {
+      address = "192.168.88.1";
+      username = "admin";
     };
 
-    bridge.ports = [
-      "ether2"
-      "ether3"
-      "ether4"
-      "ether5"
-    ];
+    lan = {
+      address = "192.168.88.1/24";
+      dhcp.pool = "192.168.88.100-192.168.88.250";
+    };
 
-    hosts = {
-      server = {
-        ip = "10.0.0.10";
-        mac = "AA:BB:CC:DD:EE:FF";
-        comment = "Home server";
-        aliases = [
-          "jellyfin"
-          "home-assistant"
-        ];
+    uplinks.isp = {
+      kind = "ethernet";
+      check.host = "1.0.0.1";
+    };
+
+    dns.upstream = [ "9.9.9.9" ];
+
+    wifi = {
+      country = "United States";
+      networks.home = {
+        ssid = "home";
+        primary = true;
+        passphraseVariable = "wifi_home";
       };
     };
-
-    # Optional: enable WiFi
-    # wifi = {
-    #   enable = true;
-    #   ssid = "MY-NETWORK";
-    #   country = "united states";
-    # };
   };
 }

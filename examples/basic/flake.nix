@@ -3,6 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    flake-parts.url = "github:hercules-ci/flake-parts";
     terranix = {
       url = "github:terranix/terranix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -15,22 +16,35 @@
   };
 
   outputs =
-    {
-      nixpkgs,
-      terranix,
-      nix-routeros,
-      ...
-    }:
-    let
-      system = "x86_64-linux";
-      pkgs = nixpkgs.legacyPackages.${system};
-    in
-    {
-      packages.${system}.default = nix-routeros.lib.mkRouterDerivation {
-        inherit pkgs system;
-        name = "router";
-        modules = [ ./config.nix ];
-        stateDir = ".";
-      };
+    inputs@{ flake-parts, nix-routeros, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
+
+      imports = [ inputs.terranix.flakeModule ];
+
+      perSystem =
+        { pkgs, ... }:
+        {
+          terranix.terranixConfigurations.router = {
+            modules = [
+              nix-routeros.terranixModules.default
+              ./config.nix
+            ];
+            workdir = ".";
+            terraformWrapper.package = pkgs.opentofu;
+          };
+
+          devShells.default = pkgs.mkShell {
+            packages = [
+              pkgs.opentofu
+              pkgs.jq
+            ];
+          };
+        };
     };
 }

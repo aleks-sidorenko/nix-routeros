@@ -37,7 +37,7 @@
         connection = ./modules/connection.nix;
         system = ./modules/system.nix;
         lan = ./modules/lan.nix;
-        interfaces = ./modules/interfaces.nix;
+        uplinks = ./modules/uplinks.nix;
         dns = ./modules/dns.nix;
         firewall = ./modules/firewall.nix;
         wifi = ./modules/wifi;
