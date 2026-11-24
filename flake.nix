@@ -134,7 +134,6 @@
               deadnix
               nixfmt-tree
               opentofu
-              sops
               jq
             ];
           };

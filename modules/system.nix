@@ -105,25 +105,6 @@ in
       };
     };
 
-    ipsec = {
-      dpdInterval = lib.mkOption {
-        type = lib.types.str;
-        default = "2m";
-        description = "Dead Peer Detection interval.";
-      };
-      dpdMaxFailures = lib.mkOption {
-        type = lib.types.int;
-        default = 5;
-        description = "Maximum DPD failures before peer is considered dead.";
-      };
-    };
-
-    bfd.enable = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Enable BFD (Bidirectional Forwarding Detection).";
-    };
-
     neighborDiscovery = {
       enable = lib.mkOption {
         type = lib.types.bool;
@@ -184,16 +165,6 @@ in
         accept_router_advertisements = cfg.ipv6.acceptRouterAdvertisements;
         disable_ipv6 = !cfg.ipv6.enable;
         max_neighbor_entries = cfg.ipv6.maxNeighborEntries;
-      };
-
-      routeros_ip_ipsec_profile.default = {
-        name = "default";
-        dpd_interval = cfg.ipsec.dpdInterval;
-        dpd_maximum_failures = cfg.ipsec.dpdMaxFailures;
-      };
-
-      routeros_routing_bfd_configuration.default = {
-        disabled = !cfg.bfd.enable;
       };
 
       routeros_tool_mac_server.default = {
