@@ -43,6 +43,7 @@ let
         address = "10.0.0.1";
         username = "admin";
       };
+      dns.upstream = [ "203.0.113.53" ];
     };
   };
   wifiHome = {
@@ -900,6 +901,110 @@ in
       "a$\${x}%%{y}"
     ];
   };
+  testNxdomainRecord = {
+    expr =
+      (render [
+        base
+        { routeros.dns.records."use-application-dns.net".type = "NXDOMAIN"; }
+      ]).resource.routeros_ip_dns_record.use_application_dns_net;
+    expected = {
+      name = "use-application-dns.net";
+      type = "NXDOMAIN";
+      match_subdomain = false;
+    };
+  };
+  testLeaseRecords = {
+    expr =
+      (render [
+        base
+        {
+          routeros.dns.localDomain = "home.arpa";
+          routeros.lan.leases."my-nas" = {
+            mac = "aa:bb:cc:dd:ee:ff";
+            address = "10.0.0.10";
+          };
+        }
+      ]).resource.routeros_ip_dns_record.lease_my_nas;
+    expected = {
+      name = "my-nas.home.arpa";
+      address = "10.0.0.10";
+      type = "A";
+    };
+  };
+  testNoLeaseRecordsWithoutDomain = {
+    expr =
+      (render [
+        base
+        {
+          routeros.lan.leases."my-nas" = {
+            mac = "aa:bb:cc:dd:ee:ff";
+            address = "10.0.0.10";
+          };
+        }
+      ]).resource.routeros_ip_dns_record or { };
+    expected = { };
+  };
+  testDnsSettings = {
+    expr = (render [ base ]).resource.routeros_dns.settings;
+    expected = {
+      allow_remote_requests = true;
+      servers = [ "203.0.113.53" ];
+    };
+  };
+  testEmptyUpstreamFails = {
+    expr = fails [
+      base
+      { routeros.dns.upstream = lib.mkForce [ ]; }
+    ];
+    expected = true;
+  };
+  testRecordMissingValueFails = {
+    expr = fails [
+      base
+      { routeros.dns.records.host.type = "CNAME"; }
+    ];
+    expected = true;
+  };
+  testDnsRedirectUsesLan = {
+    expr =
+      (render [
+        base
+        { routeros.lan.address = lib.mkForce "192.168.5.1/24"; }
+      ]).resource.routeros_ip_firewall_nat.dns_redirect.to_addresses;
+    expected = "192.168.5.1";
+  };
+  testNoLoopbackRule = {
+    expr = (render [ base ]).resource.routeros_ip_firewall_filter ? input_accept_loopback;
+    expected = false;
+  };
+  testFirewallDefaultsOff = {
+    expr =
+      let
+        r =
+          (render [
+            base
+            {
+              routeros.firewall.defaults = false;
+              routeros.firewall.filterRules = [
+                {
+                  name = "only";
+                  action = "drop";
+                  chain = "input";
+                }
+              ];
+            }
+          ]).resource;
+      in
+      [
+        (builtins.attrNames r.routeros_ip_firewall_filter)
+        (r ? routeros_ip_firewall_nat)
+      ];
+    expected = [
+      [ "only" ]
+      false
+    ];
+  };
+
   testVariableNamesUniqueFails = {
     expr = map fails [
       [

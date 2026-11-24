@@ -3,9 +3,8 @@ let
   cfg = config.routeros.firewall;
   helpers = config.routeros._lib;
 
-  # Preset default filter rules (generic home router rules only).
-  # Device-specific rules like TV traffic blocking go in consumer's filterRules.
-  presetFilterRules = [
+  # Generic home router rules only; site-specific ones go in filterRules.
+  presetFilterRules = lib.optionals cfg.defaults [
     {
       name = "input_accept_established";
       action = "accept";
@@ -26,13 +25,6 @@ let
       chain = "input";
       comment = "defconf: accept ICMP";
       protocol = "icmp";
-    }
-    {
-      name = "input_accept_loopback";
-      action = "accept";
-      chain = "input";
-      comment = "defconf: accept to local loopback (for CAPsMAN)";
-      dst_address = "127.0.0.1";
     }
     {
       name = "input_drop_non_lan";
@@ -104,7 +96,7 @@ let
   ];
 
   # Preset default NAT rules
-  presetNatRules = [
+  presetNatRules = lib.optionals cfg.defaults [
     {
       name = "masquerade";
       action = "masquerade";
@@ -166,7 +158,11 @@ let
 in
 {
   options.routeros.firewall = {
-    enable = lib.mkEnableOption "firewall";
+    defaults = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Include the preset defconf filter and NAT rules (including the DNS redirect to the router); false leaves only the rules you list.";
+    };
 
     connectionTracking = {
       udpTimeout = lib.mkOption {
@@ -201,7 +197,7 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
+  config = {
     resource = {
       routeros_ip_firewall_connection_tracking.default = {
         udp_timeout = cfg.connectionTracking.udpTimeout;
