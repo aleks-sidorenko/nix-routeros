@@ -30,8 +30,14 @@ let
       ++ modules;
       specialArgs.pkgs = nixpkgs.legacyPackages.${system};
     }).config;
-  # True when evaluating the rendered output throws (a failed _checks entry).
+  # True when evaluating the rendered output throws; on its own only for
+  # errors outside `_checks` (a malformed CIDR).
   fails = modules: !(builtins.tryEval (builtins.deepSeq (render modules) true)).success;
+  failedChecks =
+    modules: map (c: c.message) (lib.filter (c: !c.assertion) (evalConfig modules).routeros._checks);
+  # True when a check with this message fails and so aborts the render.
+  failsWith =
+    message: modules: lib.any (lib.hasInfix message) (failedChecks modules) && fails modules;
   base = {
     routeros = {
       device = "hap-ax3";
@@ -205,7 +211,7 @@ in
     expected = "api://10.0.0.1";
   };
   testLeaseOutsideSubnetFails = {
-    expr = fails [
+    expr = failsWith "routeros.lan.leases.far: 10.0.1.20 is outside the LAN subnet 10.0.0.0/24" [
       base
       {
         routeros.lan.leases.far = {
@@ -217,7 +223,7 @@ in
     expected = true;
   };
   testLeaseInPoolFails = {
-    expr = fails [
+    expr = failsWith "routeros.lan.leases.pooled: 10.0.0.120 is inside the DHCP pool" [
       base
       {
         routeros.lan.leases.pooled = {
@@ -229,7 +235,7 @@ in
     expected = true;
   };
   testLeaseValidDoesNotFail = {
-    expr = fails [
+    expr = failedChecks [
       base
       {
         routeros.lan.leases.ok = {
@@ -238,7 +244,7 @@ in
         };
       }
     ];
-    expected = false;
+    expected = [ ];
   };
   testServicesDefaultToSubnet = {
     expr = (render [ base ]).resource.routeros_ip_service.api.address;
@@ -384,7 +390,7 @@ in
     ];
   };
   testDuplicateCheckHostFails = {
-    expr = fails [
+    expr = failsWith "routeros.uplinks a, b share check.host 1.0.0.1" [
       base
       {
         routeros.uplinks = {
@@ -402,7 +408,7 @@ in
     expected = true;
   };
   testCheckHostInUpstreamFails = {
-    expr = fails [
+    expr = failsWith "routeros.uplinks.a.check.host 1.0.0.1 is also a DNS upstream" [
       base
       {
         routeros.dns.upstream = [ "1.0.0.1" ];
@@ -415,10 +421,10 @@ in
     expected = true;
   };
   testLteWithoutUsbFails = {
-    expr = fails [
+    expr = failsWith "routeros.uplinks.a: kind lte needs a device with a USB port" [
       base
       {
-        routeros.device = "hap-ax2";
+        routeros.device = lib.mkForce "hap-ax2";
         routeros.uplinks.a = {
           kind = "lte";
           check.host = "1.0.0.1";
@@ -447,7 +453,7 @@ in
     ];
   };
   testLeaseDuplicateMacFails = {
-    expr = fails [
+    expr = failsWith "routeros.lan.leases a, b share MAC aa:bb:cc:dd:ee:ff" [
       base
       {
         routeros.lan.leases = {
@@ -465,7 +471,7 @@ in
     expected = true;
   };
   testLeaseDuplicateAddressFails = {
-    expr = fails [
+    expr = failsWith "routeros.lan.leases a, b share address 10.0.0.20" [
       base
       {
         routeros.lan.leases = {
@@ -483,7 +489,7 @@ in
     expected = true;
   };
   testLeaseRouterAddressFails = {
-    expr = fails [
+    expr = failsWith "routeros.lan.leases.self: 10.0.0.1 is the router's own address" [
       base
       {
         routeros.lan.leases.self = {
@@ -495,7 +501,7 @@ in
     expected = true;
   };
   testLeaseChecksWithoutDhcpFail = {
-    expr = fails [
+    expr = failsWith "routeros.lan.leases.far: 10.0.1.20 is outside the LAN subnet" [
       base
       {
         routeros.lan.dhcp.enable = false;
@@ -684,7 +690,7 @@ in
     };
   };
   testWifiNoCountryFails = {
-    expr = fails [
+    expr = failsWith "routeros.wifi.country must be set" [
       base
       wifiHome
       { routeros.wifi.country = lib.mkForce null; }
@@ -692,7 +698,7 @@ in
     expected = true;
   };
   testWifiNoRadioFails = {
-    expr = fails [
+    expr = failsWith "the device profile has no Wi-Fi" [
       base
       wifiHome
       {
@@ -705,7 +711,7 @@ in
     expected = true;
   };
   testWifiNetworkWithoutRadioFails = {
-    expr = fails [
+    expr = failsWith "routeros.wifi.networks.home: no radio of the device serves bands 5ghz" [
       base
       wifiHome
       {
@@ -722,11 +728,11 @@ in
     expected = true;
   };
   testWifiValidDoesNotFail = {
-    expr = fails [
+    expr = failedChecks [
       base
       wifiHome
     ];
-    expected = false;
+    expected = [ ];
   };
   testStationRadioApVirtual =
     let
@@ -792,7 +798,7 @@ in
     ];
   };
   testStationUnknownRadioFails = {
-    expr = fails [
+    expr = failsWith "routeros.uplinks.hotspot: station.radio must name a radio of the device" [
       base
       (station true)
       { routeros.uplinks.hotspot.station.radio = lib.mkForce "wlan9"; }
@@ -800,7 +806,7 @@ in
     expected = true;
   };
   testTwoStationsOneRadioFails = {
-    expr = fails [
+    expr = failsWith "run a station on the same radio wifi2" [
       base
       (station true)
       {
@@ -816,18 +822,21 @@ in
   };
   testStationNotRuntimeManagedFails = {
     expr = [
-      (fails [
-        base
-        (station false)
-      ])
-      (fails [
+      (failsWith
+        "routeros.uplinks.hotspot: a wifi-station's SSID and credentials are chosen on the router at runtime, so runtimeManaged must be true"
+        [
+          base
+          (station false)
+        ]
+      )
+      (failedChecks [
         base
         (station true)
       ])
     ];
     expected = [
       true
-      false
+      [ ]
     ];
   };
   testWifiPrimaryOwnsMaster =
@@ -866,7 +875,7 @@ in
       ];
     };
   testWifiTwoPrimariesFails = {
-    expr = fails [
+    expr = failsWith "routeros.wifi.networks: at most one network may be primary" [
       base
       wifiHome
       {
@@ -952,14 +961,14 @@ in
     };
   };
   testEmptyUpstreamFails = {
-    expr = fails [
+    expr = failsWith "routeros.dns.upstream must list at least one server" [
       base
       { routeros.dns.upstream = lib.mkForce [ ]; }
     ];
     expected = true;
   };
   testRecordMissingValueFails = {
-    expr = fails [
+    expr = failsWith "routeros.dns.records.host: type CNAME needs cname" [
       base
       { routeros.dns.records.host.type = "CNAME"; }
     ];
@@ -1007,7 +1016,7 @@ in
 
   testRecordKeyCollisionFails = {
     expr = [
-      (fails [
+      (failsWith "routeros.dns: records.a-b, records.a_b all render as DNS resource a_b" [
         base
         {
           routeros.dns.records = {
@@ -1016,19 +1025,22 @@ in
           };
         }
       ])
-      (fails [
-        base
-        {
-          routeros = {
-            dns.localDomain = "home.arpa";
-            dns.records.lease_my_nas.address = "10.0.0.5";
-            lan.leases."my-nas" = {
-              mac = "aa:bb:cc:dd:ee:ff";
-              address = "10.0.0.10";
+      (failsWith
+        "routeros.dns: records.lease_my_nas, lan.leases.my-nas all render as DNS resource lease_my_nas"
+        [
+          base
+          {
+            routeros = {
+              dns.localDomain = "home.arpa";
+              dns.records.lease_my_nas.address = "10.0.0.5";
+              lan.leases."my-nas" = {
+                mac = "aa:bb:cc:dd:ee:ff";
+                address = "10.0.0.10";
+              };
             };
-          };
-        }
-      ])
+          }
+        ]
+      )
     ];
     expected = [
       true
@@ -1075,41 +1087,61 @@ in
     };
 
   testVariableNamesUniqueFails = {
-    expr = map fails [
-      [
-        base
-        wifiHome
-        {
-          routeros.uplinks.dsl = {
-            kind = "pppoe";
-            check.host = "9.9.9.9";
-            pppoe = {
-              user = "me";
-              passwordVariable = "wifi_home";
-            };
-          };
-        }
-      ]
-      [
-        base
-        wifiHome
-        { routeros.wifi.networks.home.passphraseVariable = lib.mkForce "routeros_password"; }
-      ]
-      [
-        base
-        wifiHome
-        {
-          routeros.wifi.networks.guest = {
-            ssid = "GUEST";
-            passphraseVariable = "wifi_home";
-          };
-        }
-      ]
-    ];
+    expr =
+      lib.zipListsWith failsWith
+        [
+          "Terraform variable wifi_home is declared by more than one of: routeros.wifi.networks.home.passphraseVariable, routeros.uplinks.dsl.pppoe.passwordVariable"
+          "Terraform variable routeros_password is declared by more than one of"
+          "Terraform variable wifi_home is declared by more than one of"
+        ]
+        [
+          [
+            base
+            wifiHome
+            {
+              routeros.uplinks.dsl = {
+                kind = "pppoe";
+                check.host = "9.9.9.9";
+                pppoe = {
+                  user = "me";
+                  passwordVariable = "wifi_home";
+                };
+              };
+            }
+          ]
+          [
+            base
+            wifiHome
+            { routeros.wifi.networks.home.passphraseVariable = lib.mkForce "routeros_password"; }
+          ]
+          [
+            base
+            wifiHome
+            {
+              routeros.wifi.networks.guest = {
+                ssid = "GUEST";
+                passphraseVariable = "wifi_home";
+              };
+            }
+          ]
+        ];
     expected = [
       true
       true
       true
     ];
+  };
+
+  testPppoeWithoutCredentialsFails = {
+    expr = failsWith "routeros.uplinks.dsl: kind pppoe needs pppoe.user and pppoe.passwordVariable" [
+      base
+      {
+        routeros.uplinks.dsl = {
+          kind = "pppoe";
+          check.host = "1.0.0.1";
+        };
+      }
+    ];
+    expected = true;
   };
 }

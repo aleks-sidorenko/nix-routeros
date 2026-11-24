@@ -1,7 +1,7 @@
 { config, lib, ... }:
 let
   helpers = import ../lib/helpers.nix { inherit lib; };
-  failed = lib.filter (c: !c.assertion) (config.routeros._checks ++ variableChecks);
+  failed = lib.filter (c: !c.assertion) config.routeros._checks;
   # Duplicate names would silently merge into one Terraform variable.
   variableChecks = lib.mapAttrsToList (name: vs: {
     assertion = lib.length vs == 1;
@@ -59,6 +59,8 @@ in
       default = helpers;
     };
   };
+
+  config.routeros._checks = variableChecks;
 
   config.resource =
     if failed == [ ] then
