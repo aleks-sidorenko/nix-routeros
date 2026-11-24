@@ -28,14 +28,36 @@ let
 
   mapUplinks = f: lib.mapAttrs' (name: u: lib.nameValuePair (sanitizeName name) (f name u));
   only = pred: lib.filterAttrs (_: pred);
-  byHost = builtins.groupBy (u: u.check.host) (
-    lib.mapAttrsToList (name: u: u // { inherit name; }) cfg
-  );
+  byHost = builtins.groupBy (u: u.check.host) named;
   ltes = only (u: u.kind == "lte") cfg;
   stationsByRadio = builtins.groupBy (u: toString u.station.radio) (
     lib.mapAttrsToList (name: u: u // { inherit name; }) (only (u: u.kind == "wifi-station") cfg)
   );
   pppoes = only (u: u.kind == "pppoe") cfg;
+
+  # Interfaces this configuration manages are referenced so OpenTofu
+  # creates them before the routes and list members that use them.
+  interfaceRef =
+    name: u:
+    {
+      lte = "\${routeros_interface_lte.${sanitizeName name}.name}";
+      pppoe = "\${routeros_interface_pppoe_client.${sanitizeName name}.name}";
+    }
+    .${u.kind} or u.interface;
+
+  named = lib.mapAttrsToList (name: u: u // { inherit name; }) cfg;
+  names = us: lib.concatMapStringsSep ", " (u: u.name) us;
+  # PPPoE runs over the device's uplink port.
+  portOf = u: if u.kind == "pppoe" then device.defaultUplink else u.interface;
+  # Only a DHCP ethernet uplink and a PPPoE session over it can share a port.
+  canShare =
+    us:
+    lib.length us <= 1
+    ||
+      lib.sort lib.lessThan (map (u: u.kind) us) == [
+        "ethernet"
+        "pppoe"
+      ];
 in
 {
   options.routeros.uplinks = lib.mkOption {
@@ -49,13 +71,28 @@ in
       _uplinkInterfaces =
         lib.mapAttrsToList (_: u: u.interface) (only (u: u.kind == "ethernet") cfg)
         ++ lib.mapAttrsToList (_: _: device.defaultUplink) pppoes;
+      _keys = lib.mapAttrsToList (name: _: {
+        resource = "routeros_interface_list_member";
+        key = sanitizeName name;
+        source = "routeros.uplinks.${name}";
+      }) cfg;
       _checks = lib.concatLists (
-        lib.mapAttrsToList (host: us: [
+        lib.mapAttrsToList (distance: us: [
           {
             assertion = lib.length us == 1;
-            message = "routeros.uplinks ${
-              lib.concatMapStringsSep ", " (u: u.name) us
-            } share check.host ${host}; their /32 routes would collide";
+            message = "routeros.uplinks ${names us} share distance ${distance}; equal distances balance traffic across them (ECMP) instead of failing over, so give each a distinct distance";
+          }
+        ]) (builtins.groupBy (u: toString u.distance) named)
+        ++ lib.mapAttrsToList (port: us: [
+          {
+            assertion = canShare us;
+            message = "routeros.uplinks ${names us} share port ${port}; only an ethernet uplink and a PPPoE uplink may share one";
+          }
+        ]) (builtins.groupBy portOf named)
+        ++ lib.mapAttrsToList (host: us: [
+          {
+            assertion = lib.length us == 1;
+            message = "routeros.uplinks ${names us} share check.host ${host}; their /32 routes would collide";
           }
           {
             assertion = !(lib.elem host config.routeros.dns.upstream);
@@ -65,9 +102,7 @@ in
         ++ lib.mapAttrsToList (radio: us: [
           {
             assertion = lib.length us == 1;
-            message = "routeros.uplinks ${
-              lib.concatMapStringsSep ", " (u: u.name) us
-            } run a station on the same radio ${radio}";
+            message = "routeros.uplinks ${names us} run a station on the same radio ${radio}";
           }
         ]) stationsByRadio
         ++ lib.mapAttrsToList (name: u: [
@@ -117,9 +152,9 @@ in
         comment = "defconf";
       };
 
-      routeros_interface_list_member = mapUplinks (_: u: {
-        inherit (u) interface;
-        list = "WAN";
+      routeros_interface_list_member = mapUplinks (name: u: {
+        interface = interfaceRef name u;
+        list = "\${routeros_interface_list.WAN.name}";
       }) cfg;
 
       routeros_ip_dhcp_client = mapUplinks (name: u: {
@@ -146,7 +181,7 @@ in
           name: u:
           lib.nameValuePair "${sanitizeName name}_check" {
             dst_address = "${u.check.host}/32";
-            gateway = u.interface;
+            gateway = interfaceRef name u;
             scope = 10;
             comment = name;
           }
@@ -167,7 +202,7 @@ in
 
       routeros_interface_lte = mapUplinks (name: u: {
         name = u.interface;
-        apn_profiles = name;
+        apn_profiles = "\${routeros_interface_lte_apn.${sanitizeName name}.name}";
       }) ltes;
 
       routeros_interface_pppoe_client = mapUplinks (name: u: {

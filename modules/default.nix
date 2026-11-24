@@ -9,6 +9,19 @@ let
       lib.concatMapStringsSep ", " (v: v.by) vs
     }";
   }) (builtins.groupBy (v: v.name) config.routeros._variables);
+  # Resources are attrsets by key, so a second source of a key would
+  # silently replace or merge into the first.
+  keyChecks = lib.concatLists (
+    lib.mapAttrsToList (
+      resource: entries:
+      lib.mapAttrsToList (key: es: {
+        assertion = lib.length es == 1;
+        message = "${
+          lib.concatMapStringsSep ", " (e: e.source) es
+        } all render as ${resource}.${key}; rename one";
+      }) (builtins.groupBy (e: e.key) entries)
+    ) (builtins.groupBy (e: e.resource) config.routeros._keys)
+  );
 in
 {
   imports = [
@@ -53,6 +66,21 @@ in
       description = "Terraform variables the modules declare, with the option declaring each; names must be unique.";
     };
 
+    _keys = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options = {
+            resource = lib.mkOption { type = lib.types.str; };
+            key = lib.mkOption { type = lib.types.str; };
+            source = lib.mkOption { type = lib.types.str; };
+          };
+        }
+      );
+      internal = true;
+      default = [ ];
+      description = "Resource keys rendered from user-chosen names (and fixed keys they could hit), with the option each comes from; keys must be unique per resource.";
+    };
+
     _lib = lib.mkOption {
       type = lib.types.attrs;
       internal = true;
@@ -60,7 +88,7 @@ in
     };
   };
 
-  config.routeros._checks = variableChecks;
+  config.routeros._checks = variableChecks ++ keyChecks;
 
   config.resource =
     if failed == [ ] then

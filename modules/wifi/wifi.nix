@@ -15,6 +15,8 @@ let
 in
 {
   interface = "routeros_wifi";
+  # Keyed by network name.
+  networkResource = "routeros_wifi_configuration";
 
   resource = {
     routeros_wifi_security = lib.mapAttrs (_: n: {

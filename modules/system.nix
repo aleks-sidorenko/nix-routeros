@@ -2,6 +2,11 @@
 let
   cfg = config.routeros.system;
   lanSubnet = config.routeros.lan.subnet;
+  lanList = "\${routeros_interface_list.LAN.name}";
+  # An interface list that is still empty would cut off MAC access.
+  afterLan = {
+    depends_on = [ "routeros_interface_list_member.bridge_LAN" ];
+  };
 
   mkServiceOpt = name: defaults: {
     enable = lib.mkOption {
@@ -100,7 +105,8 @@ in
       };
       allowedInterfaceList = lib.mkOption {
         type = lib.types.str;
-        default = "LAN";
+        default = lanList;
+        defaultText = "the LAN interface list";
         description = "Interface list allowed for MAC server access.";
       };
     };
@@ -113,7 +119,8 @@ in
       };
       interfaceList = lib.mkOption {
         type = lib.types.str;
-        default = "LAN";
+        default = lanList;
+        defaultText = "the LAN interface list";
         description = "Interface list for neighbor discovery.";
       };
     };
@@ -153,7 +160,7 @@ in
           api_ssl = mkSvc "api-ssl" cfg.services.api-ssl;
         };
 
-      routeros_ip_neighbor_discovery_settings.default = {
+      routeros_ip_neighbor_discovery_settings.default = afterLan // {
         discover_interface_list = cfg.neighborDiscovery.interfaceList;
       };
 
@@ -167,11 +174,11 @@ in
         max_neighbor_entries = cfg.ipv6.maxNeighborEntries;
       };
 
-      routeros_tool_mac_server.default = {
+      routeros_tool_mac_server.default = afterLan // {
         allowed_interface_list = cfg.macServer.allowedInterfaceList;
       };
 
-      routeros_tool_mac_server_winbox.default = {
+      routeros_tool_mac_server_winbox.default = afterLan // {
         allowed_interface_list = cfg.macServer.allowedInterfaceList;
       };
     };

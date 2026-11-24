@@ -2,6 +2,8 @@
 let
   cfg = config.routeros.firewall;
   helpers = config.routeros._lib;
+  inherit (helpers) sanitizeName;
+  wan = "\${routeros_interface_list.WAN.name}";
 
   # Generic home router rules only; site-specific ones go in filterRules.
   presetFilterRules = lib.optionals cfg.defaults [
@@ -31,7 +33,10 @@ let
       action = "drop";
       chain = "input";
       comment = "defconf: drop all not coming from LAN";
-      in_interface_list = "!LAN";
+      in_interface_list = "!\${routeros_interface_list.LAN.name}";
+      # place_before creates the chain from its end, so without this the
+      # drop could land while LAN is still empty and lock the session out.
+      depends_on = [ "routeros_interface_list_member.bridge_LAN" ];
     }
     {
       name = "forward_accept_ipsec_in";
@@ -75,23 +80,7 @@ let
       comment = "defconf: drop all from WAN not DSTNATed";
       connection_nat_state = "!dstnat";
       connection_state = "new";
-      in_interface_list = "WAN";
-    }
-    {
-      name = "input_drop_dns_tcp";
-      action = "drop";
-      chain = "input";
-      dst_port = 53;
-      in_interface_list = "WAN";
-      protocol = "tcp";
-    }
-    {
-      name = "input_drop_dns_udp";
-      action = "drop";
-      chain = "input";
-      dst_port = 53;
-      in_interface_list = "WAN";
-      protocol = "udp";
+      in_interface_list = wan;
     }
   ];
 
@@ -103,7 +92,7 @@ let
       chain = "srcnat";
       comment = "defconf: masquerade";
       ipsec_policy = "out,none";
-      out_interface_list = "WAN";
+      out_interface_list = wan;
     }
     {
       name = "dns_redirect";
@@ -126,19 +115,18 @@ let
     idx:
     let
       rule = builtins.elemAt allFilterRules idx;
-      ruleName = rule.name;
       ruleAttrs = builtins.removeAttrs rule [ "name" ];
       withOrdering =
         if idx < filterRuleCount - 1 then
           let
             nextRule = builtins.elemAt allFilterRules (idx + 1);
           in
-          ruleAttrs // { place_before = "\${routeros_ip_firewall_filter.${nextRule.name}.id}"; }
+          ruleAttrs // { place_before = "\${routeros_ip_firewall_filter.${sanitizeName nextRule.name}.id}"; }
         else
           ruleAttrs;
     in
     {
-      name = ruleName;
+      name = sanitizeName rule.name;
       value = withOrdering;
     };
 
@@ -148,20 +136,41 @@ let
     idx:
     let
       rule = builtins.elemAt allNatRules idx;
-      ruleName = rule.name;
-      ruleAttrs = builtins.removeAttrs rule [ "name" ];
     in
     {
-      name = ruleName;
-      value = ruleAttrs;
+      name = sanitizeName rule.name;
+      value = builtins.removeAttrs rule [ "name" ];
     };
+
+  ruleKeys =
+    resource: option: rules:
+    map (r: {
+      inherit resource;
+      key = sanitizeName r.name;
+      source = "routeros.firewall.${option} rule ${r.name}";
+    }) rules;
+
+  addressEntries = lib.concatLists (
+    lib.mapAttrsToList (
+      list:
+      map (address: {
+        inherit list address;
+        key = sanitizeName (builtins.replaceStrings [ "/" ":" ] [ "_" "_" ] "${list}_${address}");
+      })
+    ) cfg.addressLists
+  );
 in
 {
   options.routeros.firewall = {
     defaults = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Include the preset defconf filter and NAT rules (including the DNS redirect to the router); false leaves only the rules you list.";
+      description = ''
+        Include the preset defconf filter and NAT rules (including the DNS
+        redirect to the router); false leaves only the rules you list. The
+        router always answers DNS queries, so with false it is an open
+        resolver on the WAN unless your rules drop input from it.
+      '';
     };
 
     connectionTracking = {
@@ -198,24 +207,24 @@ in
   };
 
   config = {
+    routeros._keys =
+      ruleKeys "routeros_ip_firewall_filter" "defaults" presetFilterRules
+      ++ ruleKeys "routeros_ip_firewall_filter" "filterRules" cfg.filterRules
+      ++ ruleKeys "routeros_ip_firewall_nat" "defaults" presetNatRules
+      ++ ruleKeys "routeros_ip_firewall_nat" "natRules" cfg.natRules
+      ++ map (e: {
+        resource = "routeros_ip_firewall_addr_list";
+        inherit (e) key;
+        source = "routeros.firewall.addressLists.${e.list} ${e.address}";
+      }) addressEntries;
+
     resource = {
       routeros_ip_firewall_connection_tracking.default = {
         udp_timeout = cfg.connectionTracking.udpTimeout;
       };
 
       routeros_ip_firewall_addr_list = builtins.listToAttrs (
-        lib.concatLists (
-          lib.mapAttrsToList (
-            listName: addresses:
-            lib.imap0 (idx: addr: {
-              name = "${helpers.sanitizeName listName}_${toString idx}";
-              value = {
-                address = addr;
-                list = listName;
-              };
-            }) addresses
-          ) cfg.addressLists
-        )
+        map (e: lib.nameValuePair e.key { inherit (e) address list; }) addressEntries
       );
 
       routeros_ip_firewall_filter = builtins.listToAttrs (builtins.genList mkFilterRule filterRuleCount);

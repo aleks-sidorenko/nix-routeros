@@ -19,6 +19,8 @@ let
 in
 {
   interface = "routeros_interface_wireless";
+  # Keyed by network name.
+  networkResource = "routeros_interface_wireless_security_profiles";
 
   resource = {
     # The legacy package has no WPA3.

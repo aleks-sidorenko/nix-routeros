@@ -196,7 +196,7 @@ in
       address = "10.0.0.20";
       mac_address = "AA:BB:CC:DD:EE:FF";
       comment = "my-nas";
-      server = "lan";
+      server = "\${routeros_ip_dhcp_server.lan.name}";
     };
   };
   testProviderNoWifiVar = {
@@ -308,7 +308,7 @@ in
         "ether1"
         true
         true
-        "WAN"
+        "\${routeros_interface_list.WAN.name}"
         "WAN"
       ];
     };
@@ -338,14 +338,14 @@ in
       expected = [
         {
           dst_address = "9.9.9.9/32";
-          gateway = "lte1";
+          gateway = "\${routeros_interface_lte.backup.name}";
           scope = 10;
           comment = "backup";
         }
         2
         "internet"
         { }
-        "lte1"
+        "\${routeros_interface_lte.backup.name}"
       ];
     };
   testStationUplinkInterface = {
@@ -529,6 +529,7 @@ in
               b = {
                 kind = "lte";
                 interface = "lte2";
+                distance = 2;
                 check.host = "9.9.9.8";
               };
             };
@@ -563,11 +564,11 @@ in
         {
           a = {
             name = "lte1";
-            apn_profiles = "a";
+            apn_profiles = "\${routeros_interface_lte_apn.a.name}";
           };
           b = {
             name = "lte2";
-            apn_profiles = "b";
+            apn_profiles = "\${routeros_interface_lte_apn.b.name}";
           };
         }
       ];
@@ -1016,31 +1017,31 @@ in
 
   testRecordKeyCollisionFails = {
     expr = [
-      (failsWith "routeros.dns: records.a-b, records.a_b all render as DNS resource a_b" [
-        base
-        {
-          routeros.dns.records = {
-            "a-b".address = "10.0.0.5";
-            "a_b".address = "10.0.0.6";
-          };
-        }
-      ])
       (failsWith
-        "routeros.dns: records.lease_my_nas, lan.leases.my-nas all render as DNS resource lease_my_nas"
+        "routeros.dns.records.a-b, routeros.dns.records.a_b all render as routeros_ip_dns_record.a_b"
         [
           base
           {
-            routeros = {
-              dns.localDomain = "home.arpa";
-              dns.records.lease_my_nas.address = "10.0.0.5";
-              lan.leases."my-nas" = {
-                mac = "aa:bb:cc:dd:ee:ff";
-                address = "10.0.0.10";
-              };
+            routeros.dns.records = {
+              "a-b".address = "10.0.0.5";
+              "a_b".address = "10.0.0.6";
             };
           }
         ]
       )
+      (failsWith "all render as routeros_ip_dns_record.lease_my_nas" [
+        base
+        {
+          routeros = {
+            dns.localDomain = "home.arpa";
+            dns.records.lease_my_nas.address = "10.0.0.5";
+            lan.leases."my-nas" = {
+              mac = "aa:bb:cc:dd:ee:ff";
+              address = "10.0.0.10";
+            };
+          };
+        }
+      ])
     ];
     expected = [
       true
@@ -1132,6 +1133,139 @@ in
     ];
   };
 
+  testInputDropNonLanWaitsForLan = {
+    expr = lib.getAttrs [
+      "in_interface_list"
+      "depends_on"
+    ] (render [ base ]).resource.routeros_ip_firewall_filter.input_drop_non_lan;
+    expected = {
+      in_interface_list = "!\${routeros_interface_list.LAN.name}";
+      depends_on = [ "routeros_interface_list_member.bridge_LAN" ];
+    };
+  };
+  testLanReferencesOwners =
+    let
+      r =
+        (render [
+          base
+          {
+            routeros.lan.leases.nas = {
+              mac = "aa:bb:cc:dd:ee:ff";
+              address = "10.0.0.20";
+            };
+          }
+        ]).resource;
+      bridge = "\${routeros_interface_bridge.bridge.name}";
+    in
+    {
+      expr = [
+        r.routeros_interface_list_member.bridge_LAN
+        r.routeros_interface_bridge_port.ether2.bridge
+        r.routeros_ip_address.lan.interface
+        (lib.getAttrs [ "address_pool" "interface" ] r.routeros_ip_dhcp_server.lan)
+        r.routeros_ip_dhcp_server_lease.nas.server
+      ];
+      expected = [
+        {
+          interface = bridge;
+          list = "\${routeros_interface_list.LAN.name}";
+          comment = "defconf";
+        }
+        bridge
+        bridge
+        {
+          address_pool = "\${routeros_ip_pool.lan.name}";
+          interface = bridge;
+        }
+        "\${routeros_ip_dhcp_server.lan.name}"
+      ];
+    };
+  testSystemListsWaitForLan =
+    let
+      r = (render [ base ]).resource;
+      lan = {
+        list = "\${routeros_interface_list.LAN.name}";
+        depends_on = [ "routeros_interface_list_member.bridge_LAN" ];
+      };
+    in
+    {
+      expr = [
+        {
+          list = r.routeros_tool_mac_server.default.allowed_interface_list;
+          inherit (r.routeros_tool_mac_server.default) depends_on;
+        }
+        {
+          list = r.routeros_tool_mac_server_winbox.default.allowed_interface_list;
+          inherit (r.routeros_tool_mac_server_winbox.default) depends_on;
+        }
+        {
+          list = r.routeros_ip_neighbor_discovery_settings.default.discover_interface_list;
+          inherit (r.routeros_ip_neighbor_discovery_settings.default) depends_on;
+        }
+      ];
+      expected = [
+        lan
+        lan
+        lan
+      ];
+    };
+  testUplinkReferencesOwners =
+    let
+      cfg = [
+        base
+        {
+          routeros.uplinks = {
+            isp = {
+              kind = "ethernet";
+              check.host = "1.0.0.1";
+            };
+            dsl = {
+              kind = "pppoe";
+              distance = 2;
+              check.host = "1.0.0.2";
+              pppoe = {
+                user = "me";
+                passwordVariable = "dsl_password";
+              };
+            };
+            backup = {
+              kind = "lte";
+              distance = 3;
+              check.host = "1.0.0.3";
+            };
+          };
+        }
+      ];
+      r = (render cfg).resource;
+      wan = "\${routeros_interface_list.WAN.name}";
+      pppoe = "\${routeros_interface_pppoe_client.dsl.name}";
+      lte = "\${routeros_interface_lte.backup.name}";
+    in
+    {
+      # An ethernet uplink and a PPPoE one may share the device's uplink port.
+      expr = [
+        (failedChecks cfg)
+        r.routeros_interface_list_member.isp.list
+        r.routeros_interface_list_member.dsl.interface
+        r.routeros_ip_route.dsl_check.gateway
+        r.routeros_interface_list_member.backup.interface
+        r.routeros_ip_route.backup_check.gateway
+        r.routeros_interface_lte.backup.apn_profiles
+        r.routeros_ip_firewall_filter.forward_drop_wan_not_dstnat.in_interface_list
+        r.routeros_ip_firewall_nat.masquerade.out_interface_list
+      ];
+      expected = [
+        [ ]
+        wan
+        pppoe
+        pppoe
+        lte
+        lte
+        "\${routeros_interface_lte_apn.backup.name}"
+        wan
+        wan
+      ];
+    };
   testPppoeWithoutCredentialsFails = {
     expr = failsWith "routeros.uplinks.dsl: kind pppoe needs pppoe.user and pppoe.passwordVariable" [
       base
@@ -1143,5 +1277,243 @@ in
       }
     ];
     expected = true;
+  };
+  testEqualDistancesFail = {
+    expr =
+      failsWith
+        "routeros.uplinks a, b share distance 1; equal distances balance traffic across them (ECMP)"
+        [
+          base
+          {
+            routeros.uplinks = {
+              a = {
+                kind = "ethernet";
+                check.host = "1.0.0.1";
+              };
+              b = {
+                kind = "lte";
+                check.host = "1.0.0.2";
+              };
+            };
+          }
+        ];
+    expected = true;
+  };
+  testUplinksSharingAPortFail = {
+    expr = failsWith "routeros.uplinks a, b share port ether1" [
+      base
+      {
+        routeros.uplinks = {
+          a = {
+            kind = "ethernet";
+            check.host = "1.0.0.1";
+          };
+          b = {
+            kind = "ethernet";
+            distance = 2;
+            check.host = "1.0.0.2";
+          };
+        };
+      }
+    ];
+    expected = true;
+  };
+  testLanPortsOverlappingUplinkFail = {
+    expr = failsWith "routeros.lan.ports includes uplink interfaces ether1" [
+      base
+      {
+        routeros.lan.ports = [
+          "ether1"
+          "ether2"
+        ];
+        routeros.uplinks.a = {
+          kind = "ethernet";
+          check.host = "1.0.0.1";
+        };
+      }
+    ];
+    expected = true;
+  };
+  testUplinkKeyCollisionFails = {
+    expr = [
+      (failsWith
+        "routeros.uplinks.wan-a, routeros.uplinks.wan_a all render as routeros_interface_list_member.wan_a"
+        [
+          base
+          {
+            routeros.uplinks = {
+              wan-a = {
+                kind = "ethernet";
+                check.host = "1.0.0.1";
+              };
+              wan_a = {
+                kind = "lte";
+                distance = 2;
+                check.host = "1.0.0.2";
+              };
+            };
+          }
+        ]
+      )
+      (failsWith
+        "routeros.uplinks.bridge_LAN, routeros.lan all render as routeros_interface_list_member.bridge_LAN"
+        [
+          base
+          {
+            routeros.uplinks.bridge_LAN = {
+              kind = "ethernet";
+              check.host = "1.0.0.1";
+            };
+          }
+        ]
+      )
+    ];
+    expected = [
+      true
+      true
+    ];
+  };
+  testLeaseKeyCollisionFails = {
+    expr =
+      failsWith
+        "routeros.lan.leases.a-b, routeros.lan.leases.a_b all render as routeros_ip_dhcp_server_lease.a_b"
+        [
+          base
+          {
+            routeros.lan.leases = {
+              a-b = {
+                mac = "aa:bb:cc:dd:ee:01";
+                address = "10.0.0.20";
+              };
+              a_b = {
+                mac = "aa:bb:cc:dd:ee:02";
+                address = "10.0.0.21";
+              };
+            };
+          }
+        ];
+    expected = true;
+  };
+  testWifiNetworkKeyCollisionFails = {
+    expr =
+      failsWith
+        "routeros.wifi.networks.a-b, routeros.wifi.networks.a_b all render as routeros_wifi_configuration.a_b"
+        [
+          base
+          {
+            routeros.wifi = {
+              country = "Latvia";
+              networks = {
+                a-b = {
+                  ssid = "A";
+                  passphraseVariable = "wifi_a";
+                };
+                a_b = {
+                  ssid = "B";
+                  passphraseVariable = "wifi_b";
+                };
+              };
+            };
+          }
+        ];
+    expected = true;
+  };
+  testFirewallRuleKeyCollisionFails = {
+    expr = [
+      (failsWith
+        "routeros.firewall.defaults rule input_drop_invalid, routeros.firewall.filterRules rule input_drop_invalid all render as routeros_ip_firewall_filter.input_drop_invalid"
+        [
+          base
+          {
+            routeros.firewall.filterRules = [
+              {
+                name = "input_drop_invalid";
+                action = "accept";
+                chain = "input";
+              }
+            ];
+          }
+        ]
+      )
+      (failsWith
+        "routeros.firewall.defaults rule masquerade, routeros.firewall.natRules rule masquerade all render as routeros_ip_firewall_nat.masquerade"
+        [
+          base
+          {
+            routeros.firewall.natRules = [
+              {
+                name = "masquerade";
+                action = "masquerade";
+                chain = "srcnat";
+              }
+            ];
+          }
+        ]
+      )
+    ];
+    expected = [
+      true
+      true
+    ];
+  };
+  testAddressListKeyedByAddress = {
+    expr = [
+      (render [
+        base
+        {
+          routeros.firewall.addressLists.tv = [
+            "10.0.0.50"
+            "10.0.1.0/24"
+          ];
+        }
+      ]).resource.routeros_ip_firewall_addr_list
+      (failsWith
+        "routeros.firewall.addressLists.tv 10.0.0.50, routeros.firewall.addressLists.tv 10.0.0.50 all render as routeros_ip_firewall_addr_list.tv_10_0_0_50"
+        [
+          base
+          {
+            routeros.firewall.addressLists.tv = [
+              "10.0.0.50"
+              "10.0.0.50"
+            ];
+          }
+        ]
+      )
+    ];
+    expected = [
+      {
+        tv_10_0_0_50 = {
+          address = "10.0.0.50";
+          list = "tv";
+        };
+        tv_10_0_1_0_24 = {
+          address = "10.0.1.0/24";
+          list = "tv";
+        };
+      }
+      true
+    ];
+  };
+  testNoV1Leftovers = {
+    expr =
+      let
+        r = (render [ base ]).resource;
+      in
+      [
+        (r ? routeros_ip_ipsec_profile)
+        (r ? routeros_routing_bfd_configuration)
+        (r.routeros_ip_firewall_filter ? input_drop_dns_tcp)
+        (r.routeros_ip_firewall_filter ? input_drop_dns_udp)
+        (self.lib ? networkAddress)
+        (self.lib ? prefixLength)
+      ];
+    expected = [
+      false
+      false
+      false
+      false
+      false
+      false
+    ];
   };
 }

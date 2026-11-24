@@ -139,6 +139,13 @@ in
             message = "routeros.wifi.networks.${name}: no radio of the device serves bands ${lib.concatStringsSep ", " n.bands}";
           }) cfg.networks
         );
+      _keys = lib.optionals (device.wifi != null) (
+        lib.mapAttrsToList (name: _: {
+          resource = stack.networkResource;
+          key = sanitizeName name;
+          source = "routeros.wifi.networks.${name}";
+        }) cfg.networks
+      );
       _variables = lib.mapAttrsToList (name: n: {
         name = n.passphraseVariable;
         by = "routeros.wifi.networks.${name}.passphraseVariable";

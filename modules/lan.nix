@@ -5,6 +5,9 @@ let
   customTypes = import ../lib/types.nix { inherit lib; };
   router = (helpers.parseCidr cfg.address).address;
   inherit (helpers) sanitizeName;
+  # Referencing the owning resource makes OpenTofu create it first.
+  bridge = "\${routeros_interface_bridge.bridge.name}";
+  overlap = lib.intersectLists cfg.ports config.routeros._uplinkInterfaces;
   leases = lib.mapAttrsToList (name: lease: lease // { inherit name; }) cfg.leases;
   # Reports each value held by more than one lease, naming all its leases.
   duplicates =
@@ -110,7 +113,26 @@ in
         assertion = false;
         message = "routeros.lan.dhcp.pool must be set when the DHCP server is enabled";
       }
+      ++ [
+        {
+          assertion = overlap == [ ];
+          message = "routeros.lan.ports includes uplink interfaces ${lib.concatStringsSep ", " overlap}; bridging them joins the WAN to the LAN";
+        }
+      ]
       ++ leaseChecks;
+
+    routeros._keys = [
+      {
+        resource = "routeros_interface_list_member";
+        key = "bridge_LAN";
+        source = "routeros.lan";
+      }
+    ]
+    ++ map (l: {
+      resource = "routeros_ip_dhcp_server_lease";
+      key = sanitizeName l.name;
+      source = "routeros.lan.leases.${l.name}";
+    }) leases;
 
     resource = {
       routeros_interface_bridge.bridge = {
@@ -121,8 +143,7 @@ in
       };
 
       routeros_interface_bridge_port = lib.mapAttrs (_: interface: {
-        bridge = "bridge";
-        inherit interface;
+        inherit bridge interface;
         comment = "defconf";
         ingress_filtering = false;
         internal_path_cost = 10;
@@ -131,7 +152,7 @@ in
 
       routeros_ip_address.lan = {
         inherit (cfg) address;
-        interface = "bridge";
+        interface = bridge;
         inherit (helpers.parseCidr cfg.address) network;
         comment = "defconf";
       };
@@ -142,8 +163,8 @@ in
       };
 
       routeros_interface_list_member.bridge_LAN = {
-        interface = "bridge";
-        list = "LAN";
+        interface = bridge;
+        list = "\${routeros_interface_list.LAN.name}";
         comment = "defconf";
       };
     }
@@ -155,8 +176,8 @@ in
 
       routeros_ip_dhcp_server.lan = {
         name = "lan";
-        address_pool = "lan";
-        interface = "bridge";
+        address_pool = "\${routeros_ip_pool.lan.name}";
+        interface = bridge;
         lease_time = cfg.dhcp.leaseTime;
         dynamic_lease_identifiers = "client-mac,client-id";
       };
@@ -175,7 +196,7 @@ in
           inherit (lease) address;
           mac_address = lib.toUpper lease.mac;
           comment = if lease.comment != "" then lease.comment else name;
-          server = "lan";
+          server = "\${routeros_ip_dhcp_server.lan.name}";
         }
       ) cfg.leases;
     };
