@@ -3,6 +3,55 @@ let
   inherit (lib) mkOption types;
 in
 {
+  deviceType = types.submodule {
+    options = {
+      ethernet = mkOption {
+        type = types.listOf types.str;
+        description = "Ethernet port names.";
+      };
+      defaultUplink = mkOption {
+        type = types.str;
+        description = "Port used as the uplink unless configured otherwise.";
+      };
+      wifi = mkOption {
+        type = types.nullOr (
+          types.submodule {
+            options = {
+              stack = mkOption {
+                type = types.enum [
+                  "wifi"
+                  "wireless"
+                ];
+                description = "RouterOS Wi-Fi package (wifi = wifi-qcom, wireless = legacy).";
+              };
+              radios = mkOption {
+                type = types.attrsOf (
+                  types.submodule {
+                    options.band = mkOption {
+                      type = types.enum [
+                        "2ghz"
+                        "5ghz"
+                      ];
+                      description = "Radio band.";
+                    };
+                  }
+                );
+                description = "Radio interfaces by name.";
+              };
+            };
+          }
+        );
+        default = null;
+        description = "Wi-Fi hardware, or null when the device has none.";
+      };
+      usb = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Whether the device has a USB port.";
+      };
+    };
+  };
+
   hostType = types.submodule {
     options = {
       ip = mkOption {

@@ -5,6 +5,7 @@ let
 in
 {
   imports = [
+    ./device.nix
     ./connection.nix
     ./system.nix
     ./bridge.nix

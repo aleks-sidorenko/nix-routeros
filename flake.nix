@@ -60,6 +60,7 @@
                 terranix
                 system
                 self
+                nixpkgs
                 ;
             }
           );

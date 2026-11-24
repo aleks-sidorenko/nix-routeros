@@ -4,14 +4,26 @@
   terranix,
   system,
   self,
+  nixpkgs,
 }:
 let
   # Not a test (runTests only runs test* names); exposed for module tests.
   render =
     modules:
-    (terranix.lib.terranixConfigurationAst {
+    (terranix.lib.evalTerranixConfiguration {
       inherit system;
       modules = [ self.terranixModules.default ] ++ modules;
+    }).config;
+  # Module-level config, for options that never reach the rendered output.
+  evalConfig =
+    modules:
+    (lib.evalModules {
+      modules = [
+        "${terranix}/core/terraform-options.nix"
+        self.terranixModules.default
+      ]
+      ++ modules;
+      specialArgs.pkgs = nixpkgs.legacyPackages.${system};
     }).config;
   inherit (self.lib)
     parseCidr
@@ -22,6 +34,27 @@ let
 in
 {
   inherit render;
+
+  testDeviceNamed = {
+    expr =
+      (evalConfig [
+        {
+          routeros.device = "hap-ax3";
+          routeros.network.subnet = "10.0.0.0/24";
+        }
+      ]).routeros._device.wifi.stack;
+    expected = "wifi";
+  };
+  testDeviceAttrs = {
+    expr =
+      (evalConfig [
+        {
+          routeros.device = self.lib.devices.hap-ac2;
+          routeros.network.subnet = "10.0.0.0/24";
+        }
+      ]).routeros._device;
+    expected = self.lib.devices.hap-ac2;
+  };
 
   testParseCidr24 = {
     expr = parseCidr "10.0.0.1/24";
@@ -66,7 +99,13 @@ in
     expected = "_1c_key";
   };
   testRenderSmoke = {
-    expr = (render [ { routeros.network.subnet = "10.0.0.0/24"; } ]) ? resource;
+    expr =
+      (render [
+        {
+          routeros.network.subnet = "10.0.0.0/24";
+          routeros.device = "hap-ax3";
+        }
+      ]) ? resource;
     expected = true;
   };
 }
