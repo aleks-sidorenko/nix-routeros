@@ -65,4 +65,8 @@ in
     expr = sanitizeName "1c-key";
     expected = "_1c_key";
   };
+  testRenderSmoke = {
+    expr = (render [ { routeros.network.subnet = "10.0.0.0/24"; } ]) ? resource;
+    expected = true;
+  };
 }
