@@ -5,6 +5,33 @@ let
   customTypes = import ../lib/types.nix { inherit lib; };
   router = (helpers.parseCidr cfg.address).address;
   inherit (helpers) sanitizeName;
+  leases = lib.mapAttrsToList (name: lease: lease // { inherit name; }) cfg.leases;
+  # Reports each value held by more than one lease, naming all its leases.
+  duplicates =
+    what: key:
+    lib.mapAttrsToList (value: ls: {
+      assertion = lib.length ls == 1;
+      message = "routeros.lan.leases ${
+        lib.concatMapStringsSep ", " (l: l.name) ls
+      } share ${what} ${value}";
+    }) (builtins.groupBy key leases);
+  leaseChecks =
+    lib.concatMap (lease: [
+      {
+        assertion = helpers.ipInCidr lease.address cfg.subnet;
+        message = "routeros.lan.leases.${lease.name}: ${lease.address} is outside the LAN subnet ${cfg.subnet}";
+      }
+      {
+        assertion = cfg.dhcp.pool == null || !(helpers.ipInRange lease.address cfg.dhcp.pool);
+        message = "routeros.lan.leases.${lease.name}: ${lease.address} is inside the DHCP pool ${toString cfg.dhcp.pool}";
+      }
+      {
+        assertion = lease.address != router;
+        message = "routeros.lan.leases.${lease.name}: ${lease.address} is the router's own address";
+      }
+    ]) leases
+    ++ duplicates "MAC" (l: lib.toLower l.mac)
+    ++ duplicates "address" (l: l.address);
 in
 {
   options.routeros = {
@@ -74,20 +101,7 @@ in
         assertion = false;
         message = "routeros.lan.dhcp.pool must be set when the DHCP server is enabled";
       }
-      ++ lib.optionals cfg.dhcp.enable (
-        lib.concatLists (
-          lib.mapAttrsToList (name: lease: [
-            {
-              assertion = helpers.ipInCidr lease.address cfg.subnet;
-              message = "routeros.lan.leases.${name}: ${lease.address} is outside the LAN subnet ${cfg.subnet}";
-            }
-            {
-              assertion = cfg.dhcp.pool == null || !(helpers.ipInRange lease.address cfg.dhcp.pool);
-              message = "routeros.lan.leases.${name}: ${lease.address} is inside the DHCP pool ${toString cfg.dhcp.pool}";
-            }
-          ]) cfg.leases
-        )
-      );
+      ++ leaseChecks;
 
     resource = {
       routeros_interface_bridge.bridge = {

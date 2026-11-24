@@ -52,6 +52,76 @@ in
     };
   };
 
+  # `defaultUplink` is the device's uplink port, the default interface of an ethernet uplink.
+  uplinkType =
+    { defaultUplink }:
+    types.submodule (
+      { name, config, ... }:
+      {
+        options = {
+          kind = mkOption {
+            type = types.enum [
+              "ethernet"
+              "wifi-station"
+              "lte"
+              "pppoe"
+            ];
+            description = "How the uplink connects.";
+          };
+          interface = mkOption {
+            type = types.str;
+            default =
+              {
+                ethernet = defaultUplink;
+                lte = "lte1";
+                pppoe = "pppoe-${name}";
+                wifi-station = "${toString config.station.radio}-station";
+              }
+              .${config.kind};
+            defaultText = "by kind: the device uplink port, lte1, pppoe-<name>, <station.radio>-station";
+            description = "Interface carrying the uplink.";
+          };
+          distance = mkOption {
+            type = types.int;
+            default = 1;
+            description = "Default route distance; the lowest healthy uplink wins.";
+          };
+          check.host = mkOption {
+            type = types.str;
+            description = "Address pinged to decide whether the uplink is up; reached only through this uplink, so it must be unique and not a DNS upstream.";
+            example = "1.0.0.1";
+          };
+          runtimeManaged = mkOption {
+            type = types.bool;
+            default = false;
+            description = "The interface is configured on the router by hand (a Wi-Fi station whose network is joined at runtime), so Terraform ignores its connection settings.";
+          };
+          lte.apn = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            description = "APN to configure; null leaves the router's APN settings alone.";
+          };
+          pppoe = {
+            user = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              description = "PPPoE username.";
+            };
+            passwordVariable = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              description = "Name of the sensitive Terraform variable holding the PPPoE password.";
+            };
+          };
+          station.radio = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            description = "Radio the station interface is created on.";
+          };
+        };
+      }
+    );
+
   leaseType = types.submodule {
     options = {
       mac = mkOption {

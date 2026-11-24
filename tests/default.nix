@@ -248,4 +248,244 @@ in
       ]
     ];
   };
+
+  testEthernetUplinkRoutes =
+    let
+      r =
+        (render [
+          base
+          {
+            routeros.uplinks.primary = {
+              kind = "ethernet";
+              check.host = "1.0.0.1";
+            };
+          }
+        ]).resource;
+    in
+    {
+      expr = [
+        r.routeros_ip_route.primary_default.distance
+        r.routeros_ip_route.primary_default.gateway
+        r.routeros_ip_route.primary_default.check_gateway
+        r.routeros_ip_route.primary_default.target_scope
+        r.routeros_ip_dhcp_client.primary.add_default_route
+        r.routeros_ip_dhcp_client.primary.interface
+        (lib.hasInfix "1.0.0.1/32" r.routeros_ip_dhcp_client.primary.script)
+        (lib.hasInfix "nix-routeros:primary" r.routeros_ip_dhcp_client.primary.script)
+        r.routeros_interface_list_member.primary.list
+        r.routeros_interface_list.WAN.name
+      ];
+      expected = [
+        1
+        "1.0.0.1"
+        "ping"
+        11
+        "no"
+        "ether1"
+        true
+        true
+        "WAN"
+        "WAN"
+      ];
+    };
+  testLteCheckRoute =
+    let
+      r =
+        (render [
+          base
+          {
+            routeros.uplinks.backup = {
+              kind = "lte";
+              distance = 2;
+              check.host = "9.9.9.9";
+              lte.apn = "internet";
+            };
+          }
+        ]).resource;
+    in
+    {
+      expr = [
+        r.routeros_ip_route.backup_check
+        r.routeros_ip_route.backup_default.distance
+        r.routeros_interface_lte_apn.backup.apn
+        (r.routeros_ip_dhcp_client or { })
+        r.routeros_interface_list_member.backup.interface
+      ];
+      expected = [
+        {
+          dst_address = "9.9.9.9/32";
+          gateway = "lte1";
+          scope = 10;
+          comment = "backup";
+        }
+        2
+        "internet"
+        { }
+        "lte1"
+      ];
+    };
+  testStationUplinkInterface = {
+    expr =
+      (render [
+        base
+        {
+          routeros.uplinks.hotspot = {
+            kind = "wifi-station";
+            station.radio = "wifi2";
+            check.host = "9.9.9.9";
+          };
+        }
+      ]).resource.routeros_ip_dhcp_client.hotspot.interface;
+    expected = "wifi2-station";
+  };
+  testPppoeVariable = {
+    expr =
+      let
+        c = render [
+          base
+          {
+            routeros.uplinks.dsl = {
+              kind = "pppoe";
+              check.host = "9.9.9.9";
+              pppoe = {
+                user = "me";
+                passwordVariable = "dsl_password";
+              };
+            };
+          }
+        ];
+      in
+      [
+        c.variable.dsl_password.sensitive
+        c.resource.routeros_interface_pppoe_client.dsl.password
+      ];
+    expected = [
+      true
+      "\${var.dsl_password}"
+    ];
+  };
+  testDuplicateCheckHostFails = {
+    expr = fails [
+      base
+      {
+        routeros.uplinks = {
+          a = {
+            kind = "ethernet";
+            check.host = "1.0.0.1";
+          };
+          b = {
+            kind = "lte";
+            check.host = "1.0.0.1";
+          };
+        };
+      }
+    ];
+    expected = true;
+  };
+  testCheckHostInUpstreamFails = {
+    expr = fails [
+      base
+      {
+        routeros.dns.upstream = [ "1.0.0.1" ];
+        routeros.uplinks.a = {
+          kind = "ethernet";
+          check.host = "1.0.0.1";
+        };
+      }
+    ];
+    expected = true;
+  };
+  testLteWithoutUsbFails = {
+    expr = fails [
+      base
+      {
+        routeros.device = "hap-ax2";
+        routeros.uplinks.a = {
+          kind = "lte";
+          check.host = "1.0.0.1";
+        };
+      }
+    ];
+    expected = true;
+  };
+  testLanPortsExcludeUplink = {
+    expr =
+      (evalConfig [
+        base
+        {
+          routeros.uplinks.a = {
+            kind = "ethernet";
+            interface = "ether2";
+            check.host = "1.0.0.1";
+          };
+        }
+      ]).routeros.lan.ports;
+    expected = [
+      "ether1"
+      "ether3"
+      "ether4"
+      "ether5"
+    ];
+  };
+  testLeaseDuplicateMacFails = {
+    expr = fails [
+      base
+      {
+        routeros.lan.leases = {
+          a = {
+            mac = "aa:bb:cc:dd:ee:ff";
+            address = "10.0.0.20";
+          };
+          b = {
+            mac = "AA:BB:CC:DD:EE:FF";
+            address = "10.0.0.21";
+          };
+        };
+      }
+    ];
+    expected = true;
+  };
+  testLeaseDuplicateAddressFails = {
+    expr = fails [
+      base
+      {
+        routeros.lan.leases = {
+          a = {
+            mac = "aa:bb:cc:dd:ee:01";
+            address = "10.0.0.20";
+          };
+          b = {
+            mac = "aa:bb:cc:dd:ee:02";
+            address = "10.0.0.20";
+          };
+        };
+      }
+    ];
+    expected = true;
+  };
+  testLeaseRouterAddressFails = {
+    expr = fails [
+      base
+      {
+        routeros.lan.leases.self = {
+          mac = "aa:bb:cc:dd:ee:ff";
+          address = "10.0.0.1";
+        };
+      }
+    ];
+    expected = true;
+  };
+  testLeaseChecksWithoutDhcpFail = {
+    expr = fails [
+      base
+      {
+        routeros.lan.dhcp.enable = false;
+        routeros.lan.leases.far = {
+          mac = "aa:bb:cc:dd:ee:ff";
+          address = "10.0.1.20";
+        };
+      }
+    ];
+    expected = true;
+  };
 }

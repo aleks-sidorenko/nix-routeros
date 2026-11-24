@@ -9,7 +9,7 @@ in
     ./connection.nix
     ./system.nix
     ./lan.nix
-    ./interfaces.nix
+    ./uplinks.nix
     ./dns.nix
     ./firewall.nix
     ./wifi.nix
