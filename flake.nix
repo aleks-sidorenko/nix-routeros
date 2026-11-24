@@ -76,6 +76,39 @@
         }
       );
 
+      # Rendered Terraform JSON per shipped profile, consumed by `just validate`
+      # (tofu needs the network for providers, so it is not a check).
+      packages = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          profiles = [
+            "hap-ax3"
+            "hap-ax2"
+            "hap-ac2"
+          ];
+        in
+        {
+          validate-configs = pkgs.runCommand "nix-routeros-validate-configs" { } (
+            ''
+              mkdir $out
+            ''
+            + lib.concatMapStrings (profile: ''
+              mkdir $out/${profile}
+              cp ${
+                terranix.lib.terranixConfiguration {
+                  inherit system;
+                  modules = [
+                    self.terranixModules.default
+                    (./examples/validate + "/${profile}.nix")
+                  ];
+                }
+              } $out/${profile}/config.tf.json
+            '') profiles
+          );
+        }
+      );
+
       # Templates
       templates.default = {
         path = ./templates/default;

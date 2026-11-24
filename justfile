@@ -15,6 +15,21 @@ show:
     @echo "📄 Rendering generated config..."
     nix build ./examples/basic#router.config --no-link --print-out-paths | xargs cat | jq .
 
+# Render each shipped profile and run `tofu validate` on it (needs network for providers)
+validate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    configs=$(nix build .#validate-configs --no-link --print-out-paths)
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    for dir in "$configs"/*/; do
+        profile=$(basename "$dir")
+        echo "== $profile"
+        mkdir "$tmp/$profile"
+        cp "$dir/config.tf.json" "$tmp/$profile/"
+        (cd "$tmp/$profile" && tofu init -backend=false -input=false >/dev/null && tofu validate)
+    done
+
 # Format nix files with nixfmt-tree (writes)
 format *path=".":
     @echo "✨ Formatting nix files with nixfmt-tree..."
