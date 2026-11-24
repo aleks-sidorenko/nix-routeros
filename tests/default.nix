@@ -1019,11 +1019,13 @@ in
       (fails [
         base
         {
-          routeros.dns.localDomain = "home.arpa";
-          routeros.dns.records.lease_my_nas.address = "10.0.0.5";
-          routeros.lan.leases."my-nas" = {
-            mac = "aa:bb:cc:dd:ee:ff";
-            address = "10.0.0.10";
+          routeros = {
+            dns.localDomain = "home.arpa";
+            dns.records.lease_my_nas.address = "10.0.0.5";
+            lan.leases."my-nas" = {
+              mac = "aa:bb:cc:dd:ee:ff";
+              address = "10.0.0.10";
+            };
           };
         }
       ])

@@ -130,9 +130,9 @@ in
       }) (lib.genAttrs cfg.ports lib.id // config.routeros._wifiPorts);
 
       routeros_ip_address.lan = {
-        address = cfg.address;
+        inherit (cfg) address;
         interface = "bridge";
-        network = (helpers.parseCidr cfg.address).network;
+        inherit (helpers.parseCidr cfg.address) network;
         comment = "defconf";
       };
 

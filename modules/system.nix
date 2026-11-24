@@ -152,10 +152,10 @@ in
       routeros_ip_service =
         let
           mkSvc =
-            name: numbers: svcCfg:
+            numbers: svcCfg:
             {
               inherit numbers;
-              port = svcCfg.port;
+              inherit (svcCfg) port;
               disabled = !svcCfg.enable;
             }
             // lib.optionalAttrs (svcCfg.enable && svcCfg.allowedAddresses != null) {
@@ -163,13 +163,13 @@ in
             };
         in
         {
-          ftp = mkSvc "ftp" "ftp" cfg.services.ftp;
-          ssh = mkSvc "ssh" "ssh" cfg.services.ssh;
-          telnet = mkSvc "telnet" "telnet" cfg.services.telnet;
-          www = mkSvc "www" "www" cfg.services.www;
-          winbox = mkSvc "winbox" "winbox" cfg.services.winbox;
-          api = mkSvc "api" "api" cfg.services.api;
-          api_ssl = mkSvc "api-ssl" "api-ssl" cfg.services.api-ssl;
+          ftp = mkSvc "ftp" cfg.services.ftp;
+          ssh = mkSvc "ssh" cfg.services.ssh;
+          telnet = mkSvc "telnet" cfg.services.telnet;
+          www = mkSvc "www" cfg.services.www;
+          winbox = mkSvc "winbox" cfg.services.winbox;
+          api = mkSvc "api" cfg.services.api;
+          api_ssl = mkSvc "api-ssl" cfg.services.api-ssl;
         };
 
       routeros_ip_neighbor_discovery_settings.default = {
