@@ -350,6 +350,7 @@ in
             kind = "wifi-station";
             station.radio = "wifi2";
             check.host = "9.9.9.9";
+            runtimeManaged = true;
           };
         }
       ]).resource.routeros_ip_dhcp_client.hotspot.interface;
@@ -732,7 +733,7 @@ in
         (render [
           base
           wifiHome
-          (station false)
+          (station true)
         ]).resource;
     in
     {
@@ -741,7 +742,6 @@ in
         r.routeros_wifi.home_wifi2.master_interface
         r.routeros_wifi.wifi1.configuration.config
         (builtins.attrNames r.routeros_interface_bridge_port)
-        (r.routeros_wifi.wifi2 ? lifecycle)
         r.routeros_ip_dhcp_client.hotspot.interface
       ];
       expected = [
@@ -757,7 +757,6 @@ in
           "home_wifi2"
           "wifi1"
         ]
-        false
         "wifi2"
       ];
     };
@@ -794,7 +793,7 @@ in
   testStationUnknownRadioFails = {
     expr = fails [
       base
-      (station false)
+      (station true)
       { routeros.uplinks.hotspot.station.radio = lib.mkForce "wlan9"; }
     ];
     expected = true;
@@ -802,15 +801,141 @@ in
   testTwoStationsOneRadioFails = {
     expr = fails [
       base
-      (station false)
+      (station true)
       {
         routeros.uplinks.other = {
           kind = "wifi-station";
           station.radio = "wifi2";
           check.host = "9.9.9.8";
+          runtimeManaged = true;
         };
       }
     ];
     expected = true;
+  };
+  testStationNotRuntimeManagedFails = {
+    expr = [
+      (fails [
+        base
+        (station false)
+      ])
+      (fails [
+        base
+        (station true)
+      ])
+    ];
+    expected = [
+      true
+      false
+    ];
+  };
+  testWifiPrimaryOwnsMaster =
+    let
+      r =
+        (render [
+          base
+          {
+            routeros.wifi = {
+              country = "Latvia";
+              networks = {
+                guest = {
+                  ssid = "GUEST";
+                  passphraseVariable = "wifi_guest";
+                };
+                home = {
+                  ssid = "HOME";
+                  passphraseVariable = "wifi_home";
+                  primary = true;
+                };
+              };
+            };
+          }
+        ]).resource;
+    in
+    {
+      expr = [
+        r.routeros_wifi.wifi1.configuration.config
+        r.routeros_wifi.guest_wifi1.master_interface
+        r.routeros_wifi.guest_wifi1.configuration.config
+      ];
+      expected = [
+        "\${routeros_wifi_configuration.home.name}"
+        "\${routeros_wifi.wifi1.name}"
+        "\${routeros_wifi_configuration.guest.name}"
+      ];
+    };
+  testWifiTwoPrimariesFails = {
+    expr = fails [
+      base
+      wifiHome
+      {
+        routeros.wifi.networks = {
+          home.primary = true;
+          guest = {
+            ssid = "GUEST";
+            passphraseVariable = "wifi_guest";
+            primary = true;
+          };
+        };
+      }
+    ];
+    expected = true;
+  };
+  testWifiSsidEscaped = {
+    expr =
+      let
+        cfg = [
+          base
+          wifiHome
+          { routeros.wifi.networks.home.ssid = lib.mkForce "a\${x}%{y}"; }
+        ];
+      in
+      [
+        (render cfg).resource.routeros_wifi_configuration.home.ssid
+        (render (cfg ++ [ { routeros.device = lib.mkForce "hap-ac2"; } ]))
+        .resource.routeros_interface_wireless.wlan1.ssid
+      ];
+    expected = [
+      "a$\${x}%%{y}"
+      "a$\${x}%%{y}"
+    ];
+  };
+  testVariableNamesUniqueFails = {
+    expr = map fails [
+      [
+        base
+        wifiHome
+        {
+          routeros.uplinks.dsl = {
+            kind = "pppoe";
+            check.host = "9.9.9.9";
+            pppoe = {
+              user = "me";
+              passwordVariable = "wifi_home";
+            };
+          };
+        }
+      ]
+      [
+        base
+        wifiHome
+        { routeros.wifi.networks.home.passphraseVariable = lib.mkForce "routeros_password"; }
+      ]
+      [
+        base
+        wifiHome
+        {
+          routeros.wifi.networks.guest = {
+            ssid = "GUEST";
+            passphraseVariable = "wifi_home";
+          };
+        }
+      ]
+    ];
+    expected = [
+      true
+      true
+      true
+    ];
   };
 }

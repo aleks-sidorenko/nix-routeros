@@ -57,6 +57,9 @@ in
     in
     ipToInt (builtins.elemAt bounds 0) <= n && n <= ipToInt (builtins.elemAt bounds 1);
 
+  # Escapes Terraform template sequences so a user string renders literally.
+  escapeTemplate = builtins.replaceStrings [ "\${" "%{" ] [ "$\${" "%%{" ];
+
   # Sanitize a name for use as a Terraform resource identifier.
   # Replaces `-` and `.` with `_`, prepends `_` if name starts with a digit.
   sanitizeName =

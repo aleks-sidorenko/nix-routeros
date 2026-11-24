@@ -2,7 +2,7 @@
 let
   cfg = config.routeros.wifi;
   device = config.routeros._device;
-  inherit (config.routeros._lib) sanitizeName;
+  inherit (config.routeros._lib) sanitizeName escapeTemplate;
 
   radios = if device.wifi == null then { } else device.wifi.radios;
 
@@ -19,10 +19,17 @@ let
     )
   );
 
-  networksOn = band: lib.attrNames (lib.filterAttrs (_: n: lib.elem band n.bands) cfg.networks);
+  networksOn =
+    band:
+    let
+      names = lib.attrNames (lib.filterAttrs (_: n: lib.elem band n.bands) cfg.networks);
+      primary = lib.filter (n: cfg.networks.${n}.primary) names;
+    in
+    primary ++ lib.subtractLists primary names;
 
-  # Per radio, the first matching network takes the radio itself unless a
-  # station holds it; every other network is a virtual interface on it.
+  # Per radio, the primary network (else the first by name) takes the radio
+  # itself unless a station holds it; every other network is a virtual
+  # interface on it.
   aps = lib.concatLists (
     lib.mapAttrsToList (
       radio: r:
@@ -50,6 +57,7 @@ let
       stations
       radios
       sanitizeName
+      escapeTemplate
       ;
   };
 in
@@ -83,6 +91,16 @@ in
               ];
               description = "Bands the network is offered on: every radio of a listed band carries it.";
             };
+            primary = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Owns the radio interfaces on its bands; the other networks become
+                virtual interfaces. At most one network is primary. With none, the
+                first network by name owns them, which moves (and briefly drops
+                clients) when a network sorting earlier is added.
+              '';
+            };
             passphraseVariable = lib.mkOption {
               type = lib.types.str;
               description = "Name of the sensitive Terraform variable holding the passphrase.";
@@ -92,28 +110,43 @@ in
         }
       );
       default = { };
-      description = "Access point networks by name; the first by name takes each radio, the rest become virtual interfaces.";
+      description = "Access point networks by name; the primary one (else the first by name) takes each radio, the rest become virtual interfaces.";
     };
   };
 
   config = {
-    routeros._checks =
-      lib.optionals (cfg.networks != { }) [
-        {
-          assertion = cfg.country != null;
-          message = "routeros.wifi.country must be set when routeros.wifi.networks is not empty";
-        }
-        {
-          assertion = device.wifi != null;
-          message = "routeros.wifi.networks is set but the device profile has no Wi-Fi (wifi = null)";
-        }
-      ]
-      ++ lib.optionals (device.wifi != null) (
-        lib.mapAttrsToList (name: n: {
-          assertion = lib.any (r: lib.elem r.band n.bands) (lib.attrValues radios);
-          message = "routeros.wifi.networks.${name}: no radio of the device serves bands ${lib.concatStringsSep ", " n.bands}";
-        }) cfg.networks
+    routeros = {
+      _checks =
+        lib.optionals (cfg.networks != { }) [
+          {
+            assertion = cfg.country != null;
+            message = "routeros.wifi.country must be set when routeros.wifi.networks is not empty";
+          }
+          {
+            assertion = device.wifi != null;
+            message = "routeros.wifi.networks is set but the device profile has no Wi-Fi (wifi = null)";
+          }
+        ]
+        ++ [
+          {
+            assertion = lib.length (lib.attrNames (lib.filterAttrs (_: n: n.primary) cfg.networks)) <= 1;
+            message = "routeros.wifi.networks: at most one network may be primary";
+          }
+        ]
+        ++ lib.optionals (device.wifi != null) (
+          lib.mapAttrsToList (name: n: {
+            assertion = lib.any (r: lib.elem r.band n.bands) (lib.attrValues radios);
+            message = "routeros.wifi.networks.${name}: no radio of the device serves bands ${lib.concatStringsSep ", " n.bands}";
+          }) cfg.networks
+        );
+      _variables = lib.mapAttrsToList (name: n: {
+        name = n.passphraseVariable;
+        by = "routeros.wifi.networks.${name}.passphraseVariable";
+      }) cfg.networks;
+      _wifiPorts = lib.optionalAttrs (device.wifi != null) (
+        lib.listToAttrs (map (ap: lib.nameValuePair ap.key "\${${stack.interface}.${ap.key}.name}") aps)
       );
+    };
 
     variable = lib.mapAttrs' (
       _: n:
@@ -123,10 +156,6 @@ in
         description = "Wi-Fi network passphrase";
       }
     ) cfg.networks;
-
-    routeros._wifiPorts = lib.optionalAttrs (device.wifi != null) (
-      lib.listToAttrs (map (ap: lib.nameValuePair ap.key "\${${stack.interface}.${ap.key}.name}") aps)
-    );
 
     resource = lib.optionalAttrs (device.wifi != null) stack.resource;
   };

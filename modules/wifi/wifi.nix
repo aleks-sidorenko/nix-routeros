@@ -6,6 +6,7 @@
   aps,
   stations,
   sanitizeName,
+  escapeTemplate,
   ...
 }:
 let
@@ -26,7 +27,8 @@ in
     }) (netKeys cfg.networks);
 
     routeros_wifi_configuration = lib.mapAttrs (key: n: {
-      inherit (n) name ssid;
+      inherit (n) name;
+      ssid = escapeTemplate n.ssid;
       inherit (cfg) country;
       mode = "ap";
       security.config = ref "routeros_wifi_security" key;

@@ -6,6 +6,7 @@
   stations,
   radios,
   sanitizeName,
+  escapeTemplate,
   ...
 }:
 let
@@ -37,7 +38,7 @@ in
           lib.nameValuePair ap.key (
             {
               inherit (ap) name;
-              inherit (ap.network) ssid;
+              ssid = escapeTemplate ap.network.ssid;
               mode = "ap-bridge";
               security_profile = ref "routeros_interface_wireless_security_profiles" (sanitizeName ap.net);
               disabled = false;

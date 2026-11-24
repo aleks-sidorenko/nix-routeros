@@ -45,52 +45,61 @@ in
   };
 
   config = {
-    routeros._uplinkInterfaces =
-      lib.mapAttrsToList (_: u: u.interface) (only (u: u.kind == "ethernet") cfg)
-      ++ lib.mapAttrsToList (_: _: device.defaultUplink) pppoes;
-
-    routeros._checks = lib.concatLists (
-      lib.mapAttrsToList (host: us: [
-        {
-          assertion = lib.length us == 1;
-          message = "routeros.uplinks ${
-            lib.concatMapStringsSep ", " (u: u.name) us
-          } share check.host ${host}; their /32 routes would collide";
-        }
-        {
-          assertion = !(lib.elem host config.routeros.dns.upstream);
-          message = "routeros.uplinks.${(lib.head us).name}.check.host ${host} is also a DNS upstream; its /32 route would pin DNS to one uplink";
-        }
-      ]) byHost
-      ++ lib.mapAttrsToList (radio: us: [
-        {
-          assertion = lib.length us == 1;
-          message = "routeros.uplinks ${
-            lib.concatMapStringsSep ", " (u: u.name) us
-          } run a station on the same radio ${radio}";
-        }
-      ]) stationsByRadio
-      ++ lib.mapAttrsToList (name: u: [
-        {
-          assertion = u.kind != "lte" || device.usb;
-          message = "routeros.uplinks.${name}: kind lte needs a device with a USB port";
-        }
-        {
-          assertion =
-            u.kind != "wifi-station"
-            || (u.station.radio != null && device.wifi != null && device.wifi.radios ? ${u.station.radio});
-          message = "routeros.uplinks.${name}: station.radio must name a radio of the device";
-        }
-        {
-          assertion = u.kind != "wifi-station" || u.interface == u.station.radio;
-          message = "routeros.uplinks.${name}: a station runs on its radio's own interface, so interface must equal station.radio";
-        }
-        {
-          assertion = u.kind != "pppoe" || (u.pppoe.user != null && u.pppoe.passwordVariable != null);
-          message = "routeros.uplinks.${name}: kind pppoe needs pppoe.user and pppoe.passwordVariable";
-        }
-      ]) cfg
-    );
+    routeros = {
+      _uplinkInterfaces =
+        lib.mapAttrsToList (_: u: u.interface) (only (u: u.kind == "ethernet") cfg)
+        ++ lib.mapAttrsToList (_: _: device.defaultUplink) pppoes;
+      _checks = lib.concatLists (
+        lib.mapAttrsToList (host: us: [
+          {
+            assertion = lib.length us == 1;
+            message = "routeros.uplinks ${
+              lib.concatMapStringsSep ", " (u: u.name) us
+            } share check.host ${host}; their /32 routes would collide";
+          }
+          {
+            assertion = !(lib.elem host config.routeros.dns.upstream);
+            message = "routeros.uplinks.${(lib.head us).name}.check.host ${host} is also a DNS upstream; its /32 route would pin DNS to one uplink";
+          }
+        ]) byHost
+        ++ lib.mapAttrsToList (radio: us: [
+          {
+            assertion = lib.length us == 1;
+            message = "routeros.uplinks ${
+              lib.concatMapStringsSep ", " (u: u.name) us
+            } run a station on the same radio ${radio}";
+          }
+        ]) stationsByRadio
+        ++ lib.mapAttrsToList (name: u: [
+          {
+            assertion = u.kind != "lte" || device.usb;
+            message = "routeros.uplinks.${name}: kind lte needs a device with a USB port";
+          }
+          {
+            assertion =
+              u.kind != "wifi-station"
+              || (u.station.radio != null && device.wifi != null && device.wifi.radios ? ${u.station.radio});
+            message = "routeros.uplinks.${name}: station.radio must name a radio of the device";
+          }
+          {
+            assertion = u.kind != "wifi-station" || u.runtimeManaged;
+            message = "routeros.uplinks.${name}: a wifi-station's SSID and credentials are chosen on the router at runtime, so runtimeManaged must be true";
+          }
+          {
+            assertion = u.kind != "wifi-station" || u.interface == u.station.radio;
+            message = "routeros.uplinks.${name}: a station runs on its radio's own interface, so interface must equal station.radio";
+          }
+          {
+            assertion = u.kind != "pppoe" || (u.pppoe.user != null && u.pppoe.passwordVariable != null);
+            message = "routeros.uplinks.${name}: kind pppoe needs pppoe.user and pppoe.passwordVariable";
+          }
+        ]) cfg
+      );
+      _variables = lib.mapAttrsToList (name: u: {
+        name = u.pppoe.passwordVariable;
+        by = "routeros.uplinks.${name}.pppoe.passwordVariable";
+      }) (only (u: u.pppoe.passwordVariable != null) pppoes);
+    };
 
     variable = lib.mkMerge (
       lib.mapAttrsToList (_: u: {

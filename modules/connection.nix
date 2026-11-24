@@ -33,6 +33,17 @@ in
   };
 
   config = {
+    routeros._variables = [
+      {
+        name = "routeros_username";
+        by = "routeros.connection.username";
+      }
+      {
+        name = "routeros_password";
+        by = "routeros.connection";
+      }
+    ];
+
     terraform.required_providers.routeros = {
       source = "terraform-routeros/routeros";
       version = cfg.providerVersion;
