@@ -1,5 +1,7 @@
 # nix-routeros
 
+[![CI](https://github.com/aleks-sidorenko/nix-routeros/actions/workflows/ci.yml/badge.svg)](https://github.com/aleks-sidorenko/nix-routeros/actions/workflows/ci.yml)
+
 A library of [terranix](https://terranix.org) modules that configure a
 MikroTik home router through the
 [RouterOS Terraform provider](https://registry.terraform.io/providers/terraform-routeros/routeros).
@@ -44,11 +46,11 @@ with your own tooling.
 
 `routeros.device` is a profile name or an attrset.
 
-| Profile    | Ethernet     | Uplink port | Wi-Fi                         | USB |
-| ---------- | ------------ | ----------- | ----------------------------- | --- |
-| `hap-ax3`  | ether1-5     | ether1      | `wifi` stack: wifi1 5ghz, wifi2 2ghz | yes |
-| `hap-ax2`  | ether1-5     | ether1      | `wifi` stack: wifi1 5ghz, wifi2 2ghz | no  |
-| `hap-ac2`  | ether1-5     | ether1      | `wireless` stack: wlan1 2ghz, wlan2 5ghz | yes |
+| Profile   | Ethernet | Uplink port | Wi-Fi stack | Radios                | USB |
+| --------- | -------- | ----------- | ----------- | --------------------- | --- |
+| `hap-ax3` | ether1-5 | ether1      | `wifi`      | wifi1 5ghz, wifi2 2ghz | yes |
+| `hap-ax2` | ether1-5 | ether1      | `wifi`      | wifi1 5ghz, wifi2 2ghz | no  |
+| `hap-ac2` | ether1-5 | ether1      | `wireless`  | wlan1 2ghz, wlan2 5ghz | yes |
 
 For a model not listed, pass the same data as an attrset (`wifi = null` for a
 device without radios; `usb` defaults to `false`):
@@ -76,8 +78,8 @@ option when a check is violated.
 
 | Option | Description |
 | --- | --- |
-| `address` | Router address the provider connects to. |
-| `username` | RouterOS API username (default of the `routeros_username` variable). |
+| `address` | Router address the provider connects to. Required, no default. |
+| `username` | RouterOS API username (default of the `routeros_username` variable). Required, no default. |
 | `scheme` | `api` (default) or `apis`. |
 | `providerVersion` | Provider version constraint, default `~> 1.99`. |
 
@@ -93,7 +95,7 @@ and `neighborDiscovery`; see `modules/system.nix`.
 
 | Option | Description |
 | --- | --- |
-| `address` | Router address in CIDR, e.g. `192.168.88.1/24`. |
+| `address` | Router address in CIDR, e.g. `192.168.88.1/24`. Required, no default. |
 | `subnet` | Read-only network derived from `address`. |
 | `ports` | Interfaces bridged into the LAN. Default: the device's ethernet ports minus uplink interfaces. |
 | `dhcp.enable` | Run a DHCP server (default `true`). |
@@ -107,13 +109,13 @@ and `neighborDiscovery`; see `modules/system.nix`.
 
 | Option | Description |
 | --- | --- |
-| `kind` | `ethernet`, `wifi-station`, `lte` or `pppoe`. |
+| `kind` | `ethernet`, `wifi-station`, `lte` or `pppoe`. `lte` needs a device with a USB port. |
 | `interface` | Default by kind: the device uplink port, `lte1`, `pppoe-<name>`, `station.radio`. |
 | `distance` | Default route distance, default `1`. |
 | `check.host` | Address pinged to test the uplink. Unique per uplink and not a DNS upstream. |
 | `runtimeManaged` | Interface is configured on the router by hand. Required for `wifi-station`. |
 | `station.radio` | Radio running a `wifi-station`; its interface is the radio itself. |
-| `lte.apn` | APN to set; `null` leaves the router's APN settings alone. Needs a USB port. |
+| `lte.apn` | APN to set; `null` leaves the router's APN settings alone. |
 | `pppoe.user`, `pppoe.passwordVariable` | PPPoE credentials; the password is a Terraform variable. |
 
 Failover: each uplink gets a default route with `check_gateway=ping` towards
@@ -130,7 +132,7 @@ traffic, and the next one takes over when it fails.
 | --- | --- |
 | `ssid` | Network name. |
 | `bands` | `2ghz`, `5ghz`; default both. Every radio of a listed band carries the network. |
-| `primary` | Owns the radio interfaces on its bands; others become virtual interfaces. At most one. |
+| `primary` | Owns the radio interfaces on its bands; others become virtual interfaces. At most one. Without one, the first network by name owns the radios, so adding an earlier-sorting network moves them. |
 | `passphraseVariable` | Name of the sensitive Terraform variable holding the passphrase. |
 
 Networks require a device with Wi-Fi hardware. The `wifi` and `wireless`
@@ -149,7 +151,7 @@ stacks are chosen from the device profile.
 | Option | Description |
 | --- | --- |
 | `defaults` | Include the preset defconf filter and NAT rules, including the DNS redirect (default `true`). |
-| `filterRules`, `natRules` | Extra rules appended after the presets; each has a unique `name`, `chain`, `action`, plus any provider attributes. Rule order is the resource order. |
+| `filterRules`, `natRules` | Extra rules appended after the presets; each needs a unique `name`; every other key is a RouterOS attribute passed through (`chain`, `action`, ...). Rule order is the resource order. |
 | `addressLists` | Address lists, name to list of addresses. |
 | `connectionTracking.udpTimeout` | Default `10s`. |
 
