@@ -44,89 +44,37 @@
         wifi = ./modules/wifi.nix;
       };
 
-      # Presets
-      presets.router = ./presets/router.nix;
-
-      # Lib helpers
       lib = helpers // {
-        mkRouterDerivation =
-          {
-            pkgs,
-            system,
-            name ? "router",
-            modules ? [ ],
-            stateDir ? ".",
-            secretsFile ? null,
-            secrets ? { },
-          }:
-          let
-            terraformConfiguration = terranix.lib.terranixConfiguration {
-              inherit system;
-              extraArgs = { inherit lib pkgs; };
-              modules = [ self.presets.router ] ++ modules;
-            };
-
-            tofu = "${pkgs.opentofu}/bin/tofu";
-            sops = "${pkgs.sops}/bin/sops";
-
-            resolveRoot = ''
-              if [[ -z "''${FLAKE_DIR:-}" ]]; then
-                echo "Error: FLAKE_DIR not set. Export it to the flake root directory."
-                exit 1
-              fi
-              REPO_ROOT="$FLAKE_DIR"
-            '';
-
-            loadSecrets =
-              if secretsFile != null && secrets != { } then
-                lib.concatStringsSep "\n" (
-                  lib.mapAttrsToList (
-                    envVar: sopsKey:
-                    ''export ${envVar}=$(${sops} -d --extract '["${sopsKey}"]' "$REPO_ROOT/${secretsFile}")''
-                  ) secrets
-                )
-              else
-                "";
-
-            tfSetup = ''
-              cd "$REPO_ROOT/${stateDir}"
-              cp -f ${terraformConfiguration} config.tf.json
-            '';
-
-            show = pkgs.writeShellScriptBin "${name}-show" ''
-              set -euo pipefail
-              cat ${terraformConfiguration} | ${pkgs.jq}/bin/jq
-            '';
-
-            plan = pkgs.writeShellScriptBin "${name}-plan" ''
-              set -euo pipefail
-              ${resolveRoot}
-              ${loadSecrets}
-              ${tfSetup}
-              ${tofu} init -input=false
-              ${tofu} plan
-            '';
-
-            apply = pkgs.writeShellScriptBin "${name}-apply" ''
-              set -euo pipefail
-              ${resolveRoot}
-              ${loadSecrets}
-              ${tfSetup}
-              ${tofu} init -input=false
-              ${tofu} apply
-            '';
-
-            destroy = pkgs.writeShellScriptBin "${name}-destroy" ''
-              set -euo pipefail
-              ${resolveRoot}
-              ${loadSecrets}
-              ${tfSetup}
-              ${tofu} init -input=false
-              ${tofu} destroy
-            '';
-          in
-          show // { inherit plan apply destroy; };
+        devices = import ./lib/devices.nix;
+        types = import ./lib/types.nix { inherit lib; };
       };
+
+      checks = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          failures = lib.runTests (
+            import ./tests {
+              inherit
+                lib
+                terranix
+                system
+                self
+                ;
+            }
+          );
+        in
+        {
+          eval = pkgs.runCommand "nix-routeros-eval" { } ''
+            ${
+              if failures == [ ] then
+                "touch $out"
+              else
+                "echo ${lib.escapeShellArg (lib.generators.toPretty { } failures)} >&2; exit 1"
+            }
+          '';
+        }
+      );
 
       # Templates
       templates.default = {
