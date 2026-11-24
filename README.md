@@ -72,7 +72,10 @@ An attrset renders exactly like a named profile with the same data.
 ## Options
 
 Every option is under `routeros.*`. Evaluation fails with a message naming the
-option when a check is violated.
+option when a check is violated. Names become Terraform resource keys with `-`
+and `.` turned into `_`, so two names differing only in those characters (or a
+name equal to a fixed key such as the `bridge_LAN` list member) fail
+evaluation instead of overwriting each other.
 
 ### connection
 
@@ -88,8 +91,9 @@ option when a check is violated.
 `identity` (default `Router`), `timezone` (default `UTC`), and `services.<name>`
 for `ssh`, `winbox`, `api` (enabled, limited to the LAN subnet) and `ftp`,
 `telnet`, `www`, `api-ssl` (disabled), each with `enable`, `port`,
-`allowedAddresses`. Also `ipSettings`, `ipv6`, `macServer`, `ipsec`, `bfd`
-and `neighborDiscovery`; see `modules/system.nix`.
+`allowedAddresses`. Also `ipSettings`, `ipv6`, `macServer` and
+`neighborDiscovery` (both limited to the LAN interface list); see
+`modules/system.nix`.
 
 ### lan
 
@@ -97,7 +101,7 @@ and `neighborDiscovery`; see `modules/system.nix`.
 | --- | --- |
 | `address` | Router address in CIDR, e.g. `192.168.88.1/24`. Required, no default. |
 | `subnet` | Read-only network derived from `address`. |
-| `ports` | Interfaces bridged into the LAN. Default: the device's ethernet ports minus uplink interfaces. |
+| `ports` | Interfaces bridged into the LAN. Default: the device's ethernet ports minus uplink interfaces; an uplink interface listed here fails evaluation. |
 | `dhcp.enable` | Run a DHCP server (default `true`). |
 | `dhcp.pool` | Dynamic range, required when DHCP is enabled. |
 | `dhcp.leaseTime` | Default `1d`. |
@@ -110,8 +114,8 @@ and `neighborDiscovery`; see `modules/system.nix`.
 | Option | Description |
 | --- | --- |
 | `kind` | `ethernet`, `wifi-station`, `lte` or `pppoe`. `lte` needs a device with a USB port. |
-| `interface` | Default by kind: the device uplink port, `lte1`, `pppoe-<name>`, `station.radio`. |
-| `distance` | Default route distance, default `1`. |
+| `interface` | Default by kind: the device uplink port, `lte1`, `pppoe-<name>`, `station.radio`. A PPPoE session runs over the device's uplink port. Two uplinks may not share a port, except an ethernet uplink and a PPPoE one. |
+| `distance` | Default route distance, default `1`. Distinct per uplink: equal distances would balance traffic (ECMP) instead of failing over. |
 | `check.host` | Address pinged to test the uplink. Unique per uplink and not a DNS upstream. |
 | `runtimeManaged` | Interface is configured on the router by hand. Required for `wifi-station`. |
 | `station.radio` | Radio running a `wifi-station`; its interface is the radio itself. |
@@ -150,9 +154,9 @@ stacks are chosen from the device profile.
 
 | Option | Description |
 | --- | --- |
-| `defaults` | Include the preset defconf filter and NAT rules, including the DNS redirect (default `true`). |
+| `defaults` | Include the preset defconf filter and NAT rules, including the DNS redirect (default `true`). The router always answers DNS queries, so with `false` it is an open resolver on the WAN unless your rules drop input from it. |
 | `filterRules`, `natRules` | Extra rules appended after the presets; each needs a unique `name`; every other key is a RouterOS attribute passed through (`chain`, `action`, ...). Rule order is the resource order. |
-| `addressLists` | Address lists, name to list of addresses. |
+| `addressLists` | Address lists, name to list of addresses; each entry is keyed by list and address. |
 | `connectionTracking.udpTimeout` | Default `10s`. |
 
 ## Secrets
@@ -172,23 +176,36 @@ evaluation. Load the values with whatever secret manager you use.
 
 ## First apply on a reset device
 
+Apply onto a device reset with no default configuration
+(`/system reset-configuration no-defaults=yes`). A defconf device already has
+the bridge, the `LAN` and `WAN` lists, the DHCP server and bridge ports, so
+the first apply fails on them, and its firewall rules would be duplicated.
+
 The provider needs a working connection, and the plan manages the bridge your
-session runs over. On a device reset to no defaults, create by hand: the
-`bridge` interface, its address (`lan.address`) and an API user with the
-username and password you will supply. Then adopt them with `import` blocks
-in a module of your own, for example:
+session runs over. Before the first apply, create by hand: the `bridge`
+interface, a bridge port for the port you are connected through, the bridge's
+address (`lan.address`) and an API user with the username and password you
+will supply. Then adopt them with `import` blocks in a module of your own;
+the bridge port's key is the port name:
 
 ```nix
 {
   import = [
     { to = "routeros_interface_bridge.bridge"; id = "*1"; }
+    { to = "routeros_interface_bridge_port.ether2"; id = "*1"; }
     { to = "routeros_ip_address.lan"; id = "*1"; }
   ];
 }
 ```
 
-Look up the ids with the provider's documentation or `/interface bridge print
-show-ids`. Built-in radios and the LTE interface may need an `import` too.
+Built-in interfaces exist on the device and must be imported too, or the
+apply fails creating them: each radio that carries a network or a station
+(`routeros_wifi.wifi1`, `routeros_wifi.wifi2` on the `wifi` stack,
+`routeros_interface_wireless.wlan1`, `routeros_interface_wireless.wlan2` on
+`wireless`) and, for an LTE uplink, `routeros_interface_lte.<uplink>`.
+
+Look up the ids with `print show-ids` in the matching menu, e.g.
+`/interface bridge print show-ids`.
 
 ## Checks
 
