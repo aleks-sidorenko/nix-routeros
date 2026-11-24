@@ -73,6 +73,20 @@ let
     // lib.optionalAttrs (r.cname != null) { cname = escapeTemplate r.cname; }
     // lib.optionalAttrs (r.forwardTo != null) { forward_to = escapeTemplate r.forwardTo; }
     // lib.optionalAttrs (r.text != null) { text = escapeTemplate r.text; };
+
+  # Both kinds land in one resource attrset, so a shared key would drop one.
+  sources =
+    lib.mapAttrsToList (key: _: {
+      resource = sanitizeName key;
+      source = "records.${key}";
+    }) cfg.records
+    ++ lib.optionals (cfg.localDomain != null) (
+      lib.mapAttrsToList (name: _: {
+        resource = "lease_${sanitizeName name}";
+        source = "lan.leases.${name}";
+      }) config.routeros.lan.leases
+    );
+  byKey = builtins.groupBy (s: s.resource) sources;
 in
 {
   options.routeros.dns = {
@@ -102,6 +116,12 @@ in
         message = "routeros.dns.upstream must list at least one server";
       }
     ]
+    ++ lib.mapAttrsToList (key: ss: {
+      assertion = lib.length ss == 1;
+      message = "routeros.dns: ${
+        lib.concatMapStringsSep ", " (s: s.source) ss
+      } all render as DNS resource ${key}";
+    }) byKey
     ++ lib.concatLists (
       lib.mapAttrsToList (
         key: r:

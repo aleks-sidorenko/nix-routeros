@@ -1005,6 +1005,73 @@ in
     ];
   };
 
+  testRecordKeyCollisionFails = {
+    expr = [
+      (fails [
+        base
+        {
+          routeros.dns.records = {
+            "a-b".address = "10.0.0.5";
+            "a_b".address = "10.0.0.6";
+          };
+        }
+      ])
+      (fails [
+        base
+        {
+          routeros.dns.localDomain = "home.arpa";
+          routeros.dns.records.lease_my_nas.address = "10.0.0.5";
+          routeros.lan.leases."my-nas" = {
+            mac = "aa:bb:cc:dd:ee:ff";
+            address = "10.0.0.10";
+          };
+        }
+      ])
+    ];
+    expected = [
+      true
+      true
+    ];
+  };
+  testRecordTypeMapping =
+    let
+      r =
+        (render [
+          base
+          {
+            routeros.dns.records = {
+              v6 = {
+                type = "AAAA";
+                address = "fd00::1";
+              };
+              fwd = {
+                type = "FWD";
+                forwardTo = "10.0.0.2";
+                matchSubdomain = true;
+              };
+              txt = {
+                type = "TXT";
+                text = "hello";
+              };
+            };
+          }
+        ]).resource.routeros_ip_dns_record;
+    in
+    {
+      expr = [
+        r.v6.address
+        r.fwd.forward_to
+        r.fwd.match_subdomain
+        r.txt.text
+      ];
+      expected = [
+        "fd00::1"
+        "10.0.0.2"
+        true
+        "hello"
+      ];
+    };
+
   testVariableNamesUniqueFails = {
     expr = map fails [
       [
