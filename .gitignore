@@ -14,3 +14,6 @@ config.tf.json
 # Internal planning docs (kept local, not published)
 docs/plans/
 docs/specs/
+
+# Example lock pins the local library by hash
+examples/*/flake.lock

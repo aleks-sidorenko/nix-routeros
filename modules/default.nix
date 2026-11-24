@@ -1,38 +1,98 @@
-{ lib, ... }:
+{ config, lib, ... }:
 let
   helpers = import ../lib/helpers.nix { inherit lib; };
-  customTypes = import ../lib/types.nix { inherit lib; };
+  failed = lib.filter (c: !c.assertion) config.routeros._checks;
+  # Duplicate names would silently merge into one Terraform variable.
+  variableChecks = lib.mapAttrsToList (name: vs: {
+    assertion = lib.length vs == 1;
+    message = "Terraform variable ${name} is declared by more than one of: ${
+      lib.concatMapStringsSep ", " (v: v.by) vs
+    }";
+  }) (builtins.groupBy (v: v.name) config.routeros._variables);
+  # Resources are attrsets by key, so a second source of a key would
+  # silently replace or merge into the first.
+  keyChecks = lib.concatLists (
+    lib.mapAttrsToList (
+      resource: entries:
+      lib.mapAttrsToList (key: es: {
+        assertion = lib.length es == 1;
+        message = "${
+          lib.concatMapStringsSep ", " (e: e.source) es
+        } all render as ${resource}.${key}; rename one";
+      }) (builtins.groupBy (e: e.key) entries)
+    ) (builtins.groupBy (e: e.resource) config.routeros._keys)
+  );
 in
 {
   imports = [
+    ./device.nix
     ./connection.nix
     ./system.nix
-    ./bridge.nix
-    ./interfaces.nix
-    ./dhcp.nix
+    ./lan.nix
+    ./uplinks.nix
     ./dns.nix
     ./firewall.nix
-    ./wifi.nix
+    ./wifi
   ];
 
   options.routeros = {
-    hosts = lib.mkOption {
-      type = lib.types.attrsOf customTypes.hostType;
-      default = { };
-      description = "Host inventory. Drives DHCP leases, DNS records, and aliases.";
+    # terranix has no `assertions`; modules append here and the entries are
+    # forced through `resource`, so a failed one aborts evaluation.
+    _checks = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options = {
+            assertion = lib.mkOption { type = lib.types.bool; };
+            message = lib.mkOption { type = lib.types.str; };
+          };
+        }
+      );
+      internal = true;
+      default = [ ];
+      description = "Evaluation-time checks: each fails evaluation with its message when its assertion is false.";
     };
 
-    # Shared network option consumed by system.nix and dhcp.nix
-    network.subnet = lib.mkOption {
-      type = lib.types.str;
-      description = "Network subnet in CIDR notation (e.g. 10.0.0.0/24).";
+    _variables = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options = {
+            name = lib.mkOption { type = lib.types.str; };
+            by = lib.mkOption { type = lib.types.str; };
+          };
+        }
+      );
+      internal = true;
+      default = [ ];
+      description = "Terraform variables the modules declare, with the option declaring each; names must be unique.";
     };
 
-    # Internal: expose helpers to other modules
+    _keys = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options = {
+            resource = lib.mkOption { type = lib.types.str; };
+            key = lib.mkOption { type = lib.types.str; };
+            source = lib.mkOption { type = lib.types.str; };
+          };
+        }
+      );
+      internal = true;
+      default = [ ];
+      description = "Resource keys rendered from user-chosen names (and fixed keys they could hit), with the option each comes from; keys must be unique per resource.";
+    };
+
     _lib = lib.mkOption {
       type = lib.types.attrs;
       internal = true;
       default = helpers;
     };
   };
+
+  config.routeros._checks = variableChecks ++ keyChecks;
+
+  config.resource =
+    if failed == [ ] then
+      { }
+    else
+      throw "nix-routeros:\n${lib.concatMapStringsSep "\n" (c: "- ${c.message}") failed}";
 }

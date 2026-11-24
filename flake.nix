@@ -36,97 +36,78 @@
         default = ./modules;
         connection = ./modules/connection.nix;
         system = ./modules/system.nix;
-        bridge = ./modules/bridge.nix;
-        interfaces = ./modules/interfaces.nix;
-        dhcp = ./modules/dhcp.nix;
+        lan = ./modules/lan.nix;
+        uplinks = ./modules/uplinks.nix;
         dns = ./modules/dns.nix;
         firewall = ./modules/firewall.nix;
-        wifi = ./modules/wifi.nix;
+        wifi = ./modules/wifi;
       };
 
-      # Presets
-      presets.router = ./presets/router.nix;
-
-      # Lib helpers
       lib = helpers // {
-        mkRouterDerivation =
-          {
-            pkgs,
-            system,
-            name ? "router",
-            modules ? [ ],
-            stateDir ? ".",
-            secretsFile ? null,
-            secrets ? { },
-          }:
-          let
-            terraformConfiguration = terranix.lib.terranixConfiguration {
-              inherit system;
-              extraArgs = { inherit lib pkgs; };
-              modules = [ self.presets.router ] ++ modules;
-            };
-
-            tofu = "${pkgs.opentofu}/bin/tofu";
-            sops = "${pkgs.sops}/bin/sops";
-
-            resolveRoot = ''
-              if [[ -z "''${FLAKE_DIR:-}" ]]; then
-                echo "Error: FLAKE_DIR not set. Export it to the flake root directory."
-                exit 1
-              fi
-              REPO_ROOT="$FLAKE_DIR"
-            '';
-
-            loadSecrets =
-              if secretsFile != null && secrets != { } then
-                lib.concatStringsSep "\n" (
-                  lib.mapAttrsToList (
-                    envVar: sopsKey:
-                    ''export ${envVar}=$(${sops} -d --extract '["${sopsKey}"]' "$REPO_ROOT/${secretsFile}")''
-                  ) secrets
-                )
-              else
-                "";
-
-            tfSetup = ''
-              cd "$REPO_ROOT/${stateDir}"
-              cp -f ${terraformConfiguration} config.tf.json
-            '';
-
-            show = pkgs.writeShellScriptBin "${name}-show" ''
-              set -euo pipefail
-              cat ${terraformConfiguration} | ${pkgs.jq}/bin/jq
-            '';
-
-            plan = pkgs.writeShellScriptBin "${name}-plan" ''
-              set -euo pipefail
-              ${resolveRoot}
-              ${loadSecrets}
-              ${tfSetup}
-              ${tofu} init -input=false
-              ${tofu} plan
-            '';
-
-            apply = pkgs.writeShellScriptBin "${name}-apply" ''
-              set -euo pipefail
-              ${resolveRoot}
-              ${loadSecrets}
-              ${tfSetup}
-              ${tofu} init -input=false
-              ${tofu} apply
-            '';
-
-            destroy = pkgs.writeShellScriptBin "${name}-destroy" ''
-              set -euo pipefail
-              ${resolveRoot}
-              ${loadSecrets}
-              ${tfSetup}
-              ${tofu} init -input=false
-              ${tofu} destroy
-            '';
-          in
-          show // { inherit plan apply destroy; };
+        devices = import ./lib/devices.nix;
+        types = import ./lib/types.nix { inherit lib; };
       };
+
+      checks = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          failures = lib.runTests (
+            import ./tests {
+              inherit
+                lib
+                terranix
+                system
+                self
+                nixpkgs
+                ;
+            }
+          );
+        in
+        {
+          eval = pkgs.runCommand "nix-routeros-eval" { } ''
+            ${
+              if failures == [ ] then
+                "touch $out"
+              else
+                "echo ${lib.escapeShellArg (lib.generators.toPretty { } failures)} >&2; exit 1"
+            }
+          '';
+        }
+      );
+
+      # Rendered Terraform JSON per shipped profile, consumed by `just validate`
+      # (tofu needs the network for providers, so it is not a check).
+      packages = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          profiles = [
+            "hap-ax3"
+            "hap-ax2"
+            "hap-ac2"
+          ];
+        in
+        {
+          validate-configs = pkgs.runCommand "nix-routeros-validate-configs" { } (
+            ''
+              mkdir $out
+            ''
+            + lib.concatMapStrings (profile: ''
+              mkdir $out/${profile}
+              cp ${
+                terranix.lib.terranixConfiguration {
+                  inherit system;
+                  modules = [
+                    self.terranixModules.default
+                    (./examples/validate + "/${profile}.nix")
+                  ];
+                }
+              } $out/${profile}/config.tf.json
+            '') profiles
+          );
+        }
+      );
 
       # Templates
       templates.default = {
@@ -153,7 +134,6 @@
               deadnix
               nixfmt-tree
               opentofu
-              sops
               jq
             ];
           };

@@ -1,10 +1,12 @@
 { config, lib, ... }:
 let
   cfg = config.routeros.system;
-  connCfg = config.routeros.connection;
-  helpers = config.routeros._lib;
-  networkAddress = helpers.networkAddress connCfg.gateway;
-  prefixLength = helpers.prefixLength config.routeros.network.subnet;
+  lanSubnet = config.routeros.lan.subnet;
+  lanList = "\${routeros_interface_list.LAN.name}";
+  # An interface list that is still empty would cut off MAC access.
+  afterLan = {
+    depends_on = [ "routeros_interface_list_member.bridge_LAN" ];
+  };
 
   mkServiceOpt = name: defaults: {
     enable = lib.mkOption {
@@ -39,9 +41,18 @@ in
     };
 
     services = {
-      ssh = mkServiceOpt "SSH" { port = 22; };
-      winbox = mkServiceOpt "Winbox" { port = 8291; };
-      api = mkServiceOpt "API" { port = 8728; };
+      ssh = mkServiceOpt "SSH" {
+        port = 22;
+        allowedAddresses = lanSubnet;
+      };
+      winbox = mkServiceOpt "Winbox" {
+        port = 8291;
+        allowedAddresses = lanSubnet;
+      };
+      api = mkServiceOpt "API" {
+        port = 8728;
+        allowedAddresses = lanSubnet;
+      };
       ftp = mkServiceOpt "FTP" {
         enable = false;
         port = 21;
@@ -94,28 +105,10 @@ in
       };
       allowedInterfaceList = lib.mkOption {
         type = lib.types.str;
-        default = "LAN";
+        default = lanList;
+        defaultText = "the LAN interface list";
         description = "Interface list allowed for MAC server access.";
       };
-    };
-
-    ipsec = {
-      dpdInterval = lib.mkOption {
-        type = lib.types.str;
-        default = "2m";
-        description = "Dead Peer Detection interval.";
-      };
-      dpdMaxFailures = lib.mkOption {
-        type = lib.types.int;
-        default = 5;
-        description = "Maximum DPD failures before peer is considered dead.";
-      };
-    };
-
-    bfd.enable = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Enable BFD (Bidirectional Forwarding Detection).";
     };
 
     neighborDiscovery = {
@@ -126,7 +119,8 @@ in
       };
       interfaceList = lib.mkOption {
         type = lib.types.str;
-        default = "LAN";
+        default = lanList;
+        defaultText = "the LAN interface list";
         description = "Interface list for neighbor discovery.";
       };
     };
@@ -143,20 +137,13 @@ in
         time_zone_autodetect = false;
       };
 
-      routeros_ip_address.bridge = {
-        address = "${connCfg.gateway}/${toString prefixLength}";
-        interface = "bridge";
-        network = networkAddress;
-        comment = "defconf";
-      };
-
       routeros_ip_service =
         let
           mkSvc =
-            name: numbers: svcCfg:
+            numbers: svcCfg:
             {
               inherit numbers;
-              port = svcCfg.port;
+              inherit (svcCfg) port;
               disabled = !svcCfg.enable;
             }
             // lib.optionalAttrs (svcCfg.enable && svcCfg.allowedAddresses != null) {
@@ -164,16 +151,16 @@ in
             };
         in
         {
-          ftp = mkSvc "ftp" "ftp" cfg.services.ftp;
-          ssh = mkSvc "ssh" "ssh" cfg.services.ssh;
-          telnet = mkSvc "telnet" "telnet" cfg.services.telnet;
-          www = mkSvc "www" "www" cfg.services.www;
-          winbox = mkSvc "winbox" "winbox" cfg.services.winbox;
-          api = mkSvc "api" "api" cfg.services.api;
-          api_ssl = mkSvc "api-ssl" "api-ssl" cfg.services.api-ssl;
+          ftp = mkSvc "ftp" cfg.services.ftp;
+          ssh = mkSvc "ssh" cfg.services.ssh;
+          telnet = mkSvc "telnet" cfg.services.telnet;
+          www = mkSvc "www" cfg.services.www;
+          winbox = mkSvc "winbox" cfg.services.winbox;
+          api = mkSvc "api" cfg.services.api;
+          api_ssl = mkSvc "api-ssl" cfg.services.api-ssl;
         };
 
-      routeros_ip_neighbor_discovery_settings.default = {
+      routeros_ip_neighbor_discovery_settings.default = afterLan // {
         discover_interface_list = cfg.neighborDiscovery.interfaceList;
       };
 
@@ -187,21 +174,11 @@ in
         max_neighbor_entries = cfg.ipv6.maxNeighborEntries;
       };
 
-      routeros_ip_ipsec_profile.default = {
-        name = "default";
-        dpd_interval = cfg.ipsec.dpdInterval;
-        dpd_maximum_failures = cfg.ipsec.dpdMaxFailures;
-      };
-
-      routeros_routing_bfd_configuration.default = {
-        disabled = !cfg.bfd.enable;
-      };
-
-      routeros_tool_mac_server.default = {
+      routeros_tool_mac_server.default = afterLan // {
         allowed_interface_list = cfg.macServer.allowedInterfaceList;
       };
 
-      routeros_tool_mac_server_winbox.default = {
+      routeros_tool_mac_server_winbox.default = afterLan // {
         allowed_interface_list = cfg.macServer.allowedInterfaceList;
       };
     };
